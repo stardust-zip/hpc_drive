@@ -76,7 +76,7 @@
               pip
 
               # Web development
-              django
+              flask
 
               # Add whatever else you'd like here.
               # pkgs.basedpyright
