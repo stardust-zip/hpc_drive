@@ -1,32 +1,36 @@
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 
-from .db import create_db_and_tables
+# Import from our new database file
+from .database import create_db_and_tables
 from .api.v1 import router_drive
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Chạy khi khởi động server
+    # Run on startup
     print("Starting up...")
     print("Creating database and tables...")
-    create_db_and_tables()
+    create_db_and_tables()  # This creates tables from models.py
     yield
-    # Chạy khi tắt server
+    # Run on shutdown
     print("Shutting down...")
 
 
 app = FastAPI(
     title="HPC Drive Microservice",
-    description="Drive service cho hệ thống quản lý trường học",
+    description="Drive service for the college management system",
     version="0.1.0",
     lifespan=lifespan,
 )
 
-# Gắn router
+# Include the router
 app.include_router(router_drive.router, prefix="/api/v1")
 
 
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+
+# uvicorn --app-dir src hpc_drive.main:app --host 0.0.0.0 --port 7777 --reload

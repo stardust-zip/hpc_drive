@@ -5,7 +5,7 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session  # Import Session from sqlalchemy.orm
 
 from .config import settings
-from .db import get_session
+from .database import get_session
 from .models import User, UserRole  # Our local SQLModel User
 from .schemas import AuthMeResponse, UserDataFromAuth  # The new schemas
 

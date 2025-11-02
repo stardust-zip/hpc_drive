@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings
+from pathlib import Path
 
 
 class Settings(BaseSettings):
@@ -7,7 +8,9 @@ class Settings(BaseSettings):
     AUTH_SERVICE_ME_URL: str = "http://localhost:8080/api/v1/me"
 
     class Config:
-        env_file = ".env"
+        env_file: str = ".env"
+
+    UPLOADS_DIR: Path = Path(__file__).resolve().parent / "uploads"
 
 
 settings = Settings()
