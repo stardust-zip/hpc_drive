@@ -1,6 +1,7 @@
 import uuid
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import or_, func
 from fastapi import HTTPException, status
 from datetime import datetime
 
@@ -454,6 +455,48 @@ def get_drive_item(
     )
 
 
-# NOTE: get_user_items_in_folder remains unchanged.
-# Its job is to list *owned* items in a folder, which is correct.
-# Listing shared items is a separate view.
+def search_items(
+    db: Session, user_id: int, query: schemas.DriveItemSearchQuery
+) -> list[models.DriveItem]:
+    """
+    Searches for items based on a set of criteria.
+
+    A user can find:
+    1. Items they own.
+    2. Items shared with them.
+
+    Filters are applied on top of this.
+    """
+
+    # Base query: Find all items the user has access to
+    # (owned OR shared with them) and are not in the trash.
+    base_query = (
+        db.query(models.DriveItem)
+        .outerjoin(models.SharePermission)
+        .filter(
+            or_(
+                models.DriveItem.owner_id == user_id,
+                models.SharePermission.shared_with_user_id == user_id,
+            ),
+            models.DriveItem.is_trashed == False,
+        )
+        .options(joinedload(models.DriveItem.file_metadata))
+        .distinct()
+    )  # Use distinct to avoid duplicates if owned AND shared
+
+    # --- Apply Dynamic Filters ---
+
+    if query.name:
+        # Use 'ilike' for case-insensitive partial matching
+        base_query = base_query.filter(models.DriveItem.name.ilike(f"%{query.name}%"))
+
+    if query.item_type:
+        base_query = base_query.filter(models.DriveItem.item_type == query.item_type)
+
+    if query.mime_type:
+        # This filter only works for files, so we join FileMetadata
+        base_query = base_query.join(models.FileMetadata).filter(
+            models.FileMetadata.mime_type.ilike(f"%{query.mime_type}%")
+        )
+
+    return base_query.order_by(models.DriveItem.name).all()

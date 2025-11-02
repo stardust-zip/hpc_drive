@@ -253,3 +253,21 @@ def get_items_shared_with_me(
     Lists all items that have been shared with the current user.
     """
     return crud.get_shared_with_me_items(db=db, user_id=current_user.user_id)
+
+
+@router.get("/search", response_model=List[schemas.DriveItemResponse])
+def search_drive_items(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session),
+    query: schemas.DriveItemSearchQuery = Depends(),  # Injects query params
+):
+    """
+    Searches for items across the user's drive (owned and shared)
+    based on optional query parameters.
+
+    **Query Parameter Examples:**
+    - `/search?name=report`
+    - `/search?item_type=FILE`
+    - `/search?name=budget&item_type=FILE&mime_type=pdf`
+    """
+    return crud.search_items(db=db, user_id=current_user.user_id, query=query)

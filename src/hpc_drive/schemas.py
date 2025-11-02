@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict
-from .models import Permission, ShareLevel
+from .models import Permission, ShareLevel, ItemType
 
 
 class AuthAccount(BaseModel):
@@ -136,3 +136,14 @@ class DriveItemUpdate(BaseModel):
 
     name: str | None = None
     parent_id: uuid.UUID | None = None
+
+
+class DriveItemSearchQuery(BaseModel):
+    """
+    Schema for search query parameters.
+    All fields are optional.
+    """
+
+    name: str | None = None  # Search for a name containing this string
+    item_type: ItemType | None = None  # Filter by FILE or FOLDER
+    mime_type: str | None = None  # Filter by a specific MIME type
