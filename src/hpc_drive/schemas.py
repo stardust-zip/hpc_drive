@@ -97,3 +97,13 @@ class DriveItemListResponse(BaseModel):
 
     parent_id: uuid.UUID | None
     items: list[DriveItemResponse]
+
+
+class DriveItemUpdate(BaseModel):
+    """
+    Schema for updating an item.
+    All fields are optional.
+    """
+
+    name: str | None = None
+    parent_id: uuid.UUID | None = None

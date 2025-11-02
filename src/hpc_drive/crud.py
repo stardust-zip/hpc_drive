@@ -2,6 +2,7 @@ import uuid
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException, status
+from datetime import datetime
 
 from . import models, schemas
 from .models import ItemType
@@ -140,4 +141,178 @@ def create_file_with_metadata(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An error occurred while creating the file: {e}",
+        )
+
+
+def get_item_for_owner(
+    db: Session, item_id: uuid.UUID, owner_id: int
+) -> models.DriveItem:
+    """
+    A helper to get an item IF the user is the owner.
+    This is the base for most update/delete operations.
+    """
+    db_item = (
+        db.query(models.DriveItem)
+        .filter(
+            models.DriveItem.item_id == item_id, models.DriveItem.owner_id == owner_id
+        )
+        .first()
+    )
+
+    if not db_item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Item not found or you do not have permission",
+        )
+    return db_item
+
+
+def trash_item(db: Session, item_id: uuid.UUID, owner_id: int) -> models.DriveItem:
+    """
+    Moves an item (and its children, if a folder) to the trash.
+    """
+    db_item = get_item_for_owner(db, item_id, owner_id)
+
+    if db_item.is_trashed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Item is already in trash"
+        )
+
+    # TODO: We need to handle recursive trashing for folders.
+    # For now, we'll just trash the single item.
+
+    db_item.is_trashed = True
+    db_item.trashed_at = datetime.utcnow()
+
+    db.add(db_item)
+    db.commit()
+    db.refresh(db_item)
+    return db_item
+
+
+def restore_item(db: Session, item_id: uuid.UUID, owner_id: int) -> models.DriveItem:
+    """
+    Restores an item from the trash.
+    """
+    db_item = get_item_for_owner(db, item_id, owner_id)
+
+    if not db_item.is_trashed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Item is not in trash"
+        )
+
+    # TODO: We need to handle recursive restoring for folders.
+
+    db_item.is_trashed = False
+    db_item.trashed_at = None
+
+    db.add(db_item)
+    db.commit()
+    db.refresh(db_item)
+    return db_item
+
+
+def get_user_trash(db: Session, owner_id: int) -> list[models.DriveItem]:
+    """
+    Gets all items for a user that are currently in the trash.
+    """
+    return (
+        db.query(models.DriveItem)
+        .options(joinedload(models.DriveItem.file_metadata))
+        .filter(
+            models.DriveItem.owner_id == owner_id, models.DriveItem.is_trashed == True
+        )
+        .order_by(models.DriveItem.trashed_at.desc())
+        .all()
+    )
+
+
+def check_for_name_conflict(
+    db: Session,
+    owner_id: int,
+    parent_id: uuid.UUID | None,
+    name: str,
+    exclude_item_id: uuid.UUID | None = None,
+):
+    """
+    Helper function to check for unique constraint violations before committing.
+    """
+    query = db.query(models.DriveItem).filter(
+        models.DriveItem.owner_id == owner_id,
+        models.DriveItem.parent_id == parent_id,
+        models.DriveItem.name == name,
+    )
+
+    if exclude_item_id:
+        # Exclude the item itself when checking (e.g., just changing parent_id)
+        query = query.filter(models.DriveItem.item_id != exclude_item_id)
+
+    if query.first():
+        # A conflict exists
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"An item with the name '{name}' already exists in this folder.",
+        )
+
+
+def update_drive_item(
+    db: Session, item_id: uuid.UUID, owner_id: int, update_data: schemas.DriveItemUpdate
+) -> models.DriveItem:
+    """
+    Updates a DriveItem's name or parent folder.
+    """
+    db_item = get_item_for_owner(db, item_id, owner_id)
+
+    if update_data.name is None and update_data.parent_id is None:
+        # Nothing to update
+        return db_item
+
+    # Determine the final name and parent_id
+    new_name = update_data.name if update_data.name is not None else db_item.name
+    new_parent_id = (
+        update_data.parent_id
+        if update_data.parent_id is not None
+        else db_item.parent_id
+    )
+
+    if new_name == db_item.name and new_parent_id == db_item.parent_id:
+        # No actual change
+        return db_item
+
+    # Check for name conflicts BEFORE making the change
+    check_for_name_conflict(
+        db=db,
+        owner_id=owner_id,
+        parent_id=new_parent_id,
+        name=new_name,
+        exclude_item_id=item_id,  # Exclude self if parent_id is unchanged
+    )
+
+    # Apply the changes
+    if update_data.name is not None:
+        db_item.name = update_data.name
+
+    if update_data.parent_id is not None:
+        # TODO: Check if moving a folder into its own descendant
+        db_item.parent_id = update_data.parent_id
+
+    db_item.updated_at = datetime.utcnow()
+
+    try:
+        db.add(db_item)
+        db.commit()
+        db.refresh(db_item)
+        return db_item
+    except IntegrityError:
+        # This is a final fallback, though check_for_name_conflict should catch it
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"An item with the name '{new_name}' already exists in this folder.",
+        )
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred: {e}",
         )

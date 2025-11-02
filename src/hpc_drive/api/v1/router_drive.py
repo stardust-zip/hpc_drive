@@ -132,3 +132,56 @@ def upload_file(
         storage_path.unlink()
         user_upload_dir.rmdir()
         raise e
+
+
+@router.patch("/items/{item_id}/trash", response_model=schemas.DriveItemResponse)
+def move_item_to_trash(
+    item_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session),
+):
+    """
+    Moves an item to the trash (sets is_trashed = True).
+    """
+    return crud.trash_item(db=db, item_id=item_id, owner_id=current_user.user_id)
+
+
+@router.patch("/items/{item_id}/restore", response_model=schemas.DriveItemResponse)
+def restore_item_from_trash(
+    item_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session),
+):
+    """
+    Restores an item from the trash (sets is_trashed = False).
+    """
+    return crud.restore_item(db=db, item_id=item_id, owner_id=current_user.user_id)
+
+
+@router.get("/trash", response_model=list[schemas.DriveItemResponse])
+def get_trashed_items(
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_session)
+):
+    """
+    Lists all items belonging to the user that are in the trash.
+    """
+    return crud.get_user_trash(db=db, owner_id=current_user.user_id)
+
+
+@router.patch("/items/{item_id}", response_model=schemas.DriveItemResponse)
+def update_item_details(
+    item_id: uuid.UUID,
+    update_data: schemas.DriveItemUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session),
+):
+    """
+    Updates an item's details, such as its name or parent folder.
+
+    To rename, send: {"name": "new_name"}
+    To move, send: {"parent_id": "new_parent_uuid"}
+    To do both, send both.
+    """
+    return crud.update_drive_item(
+        db=db, item_id=item_id, owner_id=current_user.user_id, update_data=update_data
+    )
