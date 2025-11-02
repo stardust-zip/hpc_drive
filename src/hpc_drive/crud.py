@@ -5,7 +5,7 @@ from fastapi import HTTPException, status
 from datetime import datetime
 
 from . import models, schemas
-from .models import ItemType
+from .models import ItemType, ShareLevel, Permission
 
 
 def create_drive_item(
@@ -316,3 +316,144 @@ def update_drive_item(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An error occurred: {e}",
         )
+
+
+def get_user_by_username(db: Session, username: str) -> models.User | None:
+    """Finds a user by their username."""
+    return db.query(models.User).filter(models.User.username == username).first()
+
+
+def share_item(
+    db: Session, item_id: uuid.UUID, owner_id: int, share_data: schemas.ShareCreate
+) -> models.SharePermission:
+    """
+    Shares an item with another user.
+    """
+    # 1. Verify the current user owns the item
+    db_item = get_item_for_owner(db, item_id, owner_id)
+
+    # 2. Find the user to share with
+    user_to_share_with = get_user_by_username(db, share_data.username)
+
+    if not user_to_share_with:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User '{share_data.username}' not found",
+        )
+
+    if user_to_share_with.user_id == owner_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot share an item with yourself",
+        )
+
+    # 3. Check if it's already shared with this user
+    existing_share = (
+        db.query(models.SharePermission)
+        .filter(
+            models.SharePermission.item_id == item_id,
+            models.SharePermission.shared_with_user_id == user_to_share_with.user_id,
+        )
+        .first()
+    )
+
+    if existing_share:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Item is already shared with {share_data.username}",
+        )
+
+    # 4. Create the SharePermission record (default to VIEWER)
+    db_share = models.SharePermission(
+        item_id=item_id,
+        shared_with_user_id=user_to_share_with.user_id,
+        permission_level=ShareLevel.VIEWER,  # Default as requested
+    )
+
+    # 5. Update the item's main permission status to SHARED
+    db_item.permission = Permission.SHARED
+
+    try:
+        db.add(db_share)
+        db.add(db_item)  # Add the updated item as well
+        db.commit()
+        db.refresh(db_share)
+        return db_share
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to share item: {e}",
+        )
+
+
+def get_shared_with_me_items(db: Session, user_id: int) -> list[models.DriveItem]:
+    """
+    Gets all items that have been shared with the current user.
+    """
+    # Find all DriveItems linked to SharePermission records for this user
+    return (
+        db.query(models.DriveItem)
+        .join(models.SharePermission)
+        .filter(models.SharePermission.shared_with_user_id == user_id)
+        .options(joinedload(models.DriveItem.file_metadata))
+        .filter(models.DriveItem.is_trashed == False)
+        .all()
+    )
+
+
+# --- MODIFIED: get_drive_item ---
+
+
+def get_drive_item(
+    db: Session,
+    item_id: uuid.UUID,
+    user_id: int,  # Renamed from owner_id to reflect new logic
+) -> models.DriveItem:
+    """
+    Gets a single drive item.
+    A user can access if:
+    1. They are the owner.
+    2. The item has a SharePermission for them.
+    """
+    db_item = (
+        db.query(models.DriveItem)
+        .options(joinedload(models.DriveItem.file_metadata))
+        .filter(models.DriveItem.item_id == item_id)
+        .first()
+    )
+
+    if not db_item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    if db_item.is_trashed and db_item.owner_id != user_id:
+        # Only the owner can see their own trashed items
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    # Check for ownership
+    if db_item.owner_id == user_id:
+        return db_item
+
+    # Check for share permission
+    is_shared_with_user = (
+        db.query(models.SharePermission)
+        .filter(
+            models.SharePermission.item_id == item_id,
+            models.SharePermission.shared_with_user_id == user_id,
+        )
+        .first()
+    )
+
+    if is_shared_with_user:
+        # As per requirement, shared users can "view"
+        return db_item
+
+    # If neither, they don't have permission
+    raise HTTPException(
+        status_code=403, detail="You do not have permission to access this item"
+    )
+
+
+# NOTE: get_user_items_in_folder remains unchanged.
+# Its job is to list *owned* items in a folder, which is correct.
+# Listing shared items is a separate view.

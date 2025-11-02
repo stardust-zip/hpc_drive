@@ -3,6 +3,7 @@ import shutil
 from pathlib import Path
 from fastapi import APIRouter, Depends, status, UploadFile, File, Form, HTTPException
 from sqlalchemy.orm import Session
+from typing import List, Optional
 
 # Updated imports
 from ...database import get_session
@@ -40,13 +41,22 @@ def create_item(
     """
     Create a new drive item (FILE or FOLDER) in the root
     or inside a parent folder.
+
+    **Body Example (JSON):**
+    ```json
+    {
+        "name": "My New Folder",
+        "item_type": "FOLDER",
+        "parent_id": null
+    }
+    ```
     """
     return crud.create_drive_item(db=db, item=item, owner_id=current_user.user_id)
 
 
 @router.get("/items", response_model=schemas.DriveItemListResponse)
 def list_items_in_folder(
-    parent_id: uuid.UUID | None = None,  # Pass as query parameter
+    parent_id: Optional[uuid.UUID] = None,  # Pass as query parameter
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_session),
 ):
@@ -69,7 +79,11 @@ def get_item_details(
     """
     Get the details for a single drive item.
     """
-    return crud.get_drive_item(db=db, item_id=item_id, owner_id=current_user.user_id)
+    return crud.get_drive_item(
+        db=db,
+        item_id=item_id,
+        user_id=current_user.user_id,  # Use the modified CRUD function
+    )
 
 
 @router.post(
@@ -79,7 +93,7 @@ def get_item_details(
 )
 def upload_file(
     file: UploadFile = File(...),
-    parent_id: uuid.UUID | None = Form(None),
+    parent_id: Optional[uuid.UUID] = Form(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_session),
 ):
@@ -88,6 +102,10 @@ def upload_file(
 
     The file is saved to a user-specific directory, and both a
     DriveItem and a FileMetadata record are created.
+
+    **Body (form-data):**
+    - `file`: The file to upload (e.g., `my_document.pdf`)
+    - `parent_id`: (Optional) The UUID of the parent folder.
     """
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file name provided")
@@ -112,7 +130,6 @@ def upload_file(
     # 3. Get file size from the saved file
     file_size = storage_path.stat().st_size
 
-    # ***** THIS IS THE FIX *****
     # Provide a default MIME type if one isn't provided
     mime_type = file.content_type if file.content_type else "application/octet-stream"
 
@@ -142,6 +159,7 @@ def move_item_to_trash(
 ):
     """
     Moves an item to the trash (sets is_trashed = True).
+    (No request body)
     """
     return crud.trash_item(db=db, item_id=item_id, owner_id=current_user.user_id)
 
@@ -154,11 +172,12 @@ def restore_item_from_trash(
 ):
     """
     Restores an item from the trash (sets is_trashed = False).
+    (No request body)
     """
     return crud.restore_item(db=db, item_id=item_id, owner_id=current_user.user_id)
 
 
-@router.get("/trash", response_model=list[schemas.DriveItemResponse])
+@router.get("/trash", response_model=List[schemas.DriveItemResponse])
 def get_trashed_items(
     current_user: User = Depends(get_current_user), db: Session = Depends(get_session)
 ):
@@ -178,10 +197,59 @@ def update_item_details(
     """
     Updates an item's details, such as its name or parent folder.
 
-    To rename, send: {"name": "new_name"}
-    To move, send: {"parent_id": "new_parent_uuid"}
-    To do both, send both.
+    **Body Example (JSON) - To rename:**
+    ```json
+    {
+        "name": "My Renamed Folder"
+    }
+    ```
+
+    **Body Example (JSON) - To move:**
+    ```json
+    {
+        "parent_id": "a1b2c3d4-..."
+    }
+    ```
     """
     return crud.update_drive_item(
         db=db, item_id=item_id, owner_id=current_user.user_id, update_data=update_data
     )
+
+
+@router.post(
+    "/items/{item_id}/share",
+    response_model=schemas.SharePermissionResponse,
+    tags=["Sharing"],  # Add a new tag
+)
+def share_an_item(
+    item_id: uuid.UUID,
+    share_data: schemas.ShareCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session),
+):
+    """
+    Shares an item you own with another user (by username).
+    Currently defaults to VIEWER permission.
+
+    **Body Example (JSON):**
+    ```json
+    {
+        "username": "gv_GV001"
+    }
+    ```
+    """
+    return crud.share_item(
+        db=db, item_id=item_id, owner_id=current_user.user_id, share_data=share_data
+    )
+
+
+@router.get(
+    "/shared-with-me", response_model=List[schemas.DriveItemResponse], tags=["Sharing"]
+)
+def get_items_shared_with_me(
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_session)
+):
+    """
+    Lists all items that have been shared with the current user.
+    """
+    return crud.get_shared_with_me_items(db=db, user_id=current_user.user_id)

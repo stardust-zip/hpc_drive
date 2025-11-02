@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict
+from .models import Permission, ShareLevel
 
 
 class AuthAccount(BaseModel):
@@ -87,9 +88,37 @@ class DriveItemResponse(DriveItemBase):
     created_at: datetime
     updated_at: datetime | None = None
     is_trashed: bool
+    permission: Permission
 
     # Nested metadata, will be None if it's a folder
     file_metadata: FileMetadataResponse | None = None
+
+
+class ShareCreate(BaseModel):
+    """Schema for creating a new share"""
+
+    # We'll share by username, as it's unique and in our User model
+    username: str
+    # We don't need 'level' since we default to VIEWER
+
+
+class UserSimpleResponse(BaseModel):
+    """Simplified user schema for share responses"""
+
+    model_config = ConfigDict(from_attributes=True)
+    user_id: int
+    username: str
+
+
+class SharePermissionResponse(BaseModel):
+    """Schema for displaying a share permission"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    share_id: uuid.UUID
+    item_id: uuid.UUID
+    permission_level: ShareLevel
+    shared_with_user: UserSimpleResponse  # Show who it's shared with
 
 
 class DriveItemListResponse(BaseModel):
