@@ -24,8 +24,7 @@ class Base(DeclarativeBase):
     pass
 
 
-# --- Python Enums (dịch từ Prisma) ---
-# These are the plain Python enums
+# --- Python Enums (Unchanged, as they are classes) ---
 class UserRole(str, Enum):
     ADMIN = "ADMIN"
     TEACHER = "TEACHER"
@@ -55,127 +54,127 @@ class DocumentType(str, Enum):
     OTHER = "OTHER"
 
 
-# --- Models ---
+# --- Models (CONVERTED TO SNAKE_CASE) ---
 
 
 class User(Base):
     """
-    Bản sao cục bộ của người dùng từ Auth Service.
-    userId được đồng bộ từ 'sub' của JWT/Auth Service.
+    Local cache of a user from the Auth Service.
+    All attributes are snake_case.
     """
 
     __tablename__: str = "users"
 
-    # KHÔNG tự động tăng. Nó đến từ auth service 'id'/'sub'.
-    userId: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    # 'sub' from auth service
+    user_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
 
     username: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     email: Mapped[str] = mapped_column(String(255), unique=True)
     role: Mapped[UserRole] = mapped_column(SAEnum(UserRole))
-    createdAt: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     # Relations
-    ownedItems: Mapped[list["DriveItem"]] = relationship(back_populates="owner")
-    sharedWithMe: Mapped[list["SharePermission"]] = relationship(
-        back_populates="sharedWithUser"
+    owned_items: Mapped[list["DriveItem"]] = relationship(back_populates="owner")
+    shared_with_me: Mapped[list["SharePermission"]] = relationship(
+        back_populates="shared_with_user"
     )
 
 
 class DriveItem(Base):
     """
     Represents a file or folder in the drive.
+    All attributes are snake_case.
     """
 
     __tablename__: str = "drive_items"
 
-    itemId: Mapped[uuid.UUID] = mapped_column(
+    item_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     name: Mapped[str] = mapped_column(String(255))
-    itemType: Mapped[ItemType] = mapped_column(SAEnum(ItemType))
-    isTrashed: Mapped[bool] = mapped_column(Boolean, default=False)
-    trashedAt: Mapped[datetime | None] = mapped_column(DateTime)
+    item_type: Mapped[ItemType] = mapped_column(SAEnum(ItemType))
+    is_trashed: Mapped[bool] = mapped_column(Boolean, default=False)
+    trashed_at: Mapped[datetime | None] = mapped_column(DateTime)
     permission: Mapped[Permission] = mapped_column(
         SAEnum(Permission), default=Permission.PRIVATE
     )
-    createdAt: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    updatedAt: Mapped[datetime | None] = mapped_column(DateTime, onupdate=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, onupdate=func.now())
 
     # Foreign Keys
-    ownerId: Mapped[int] = mapped_column(ForeignKey("users.userId"))
-    parentId: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("drive_items.itemId"))
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("drive_items.item_id")
+    )
 
     # Relations
-    owner: Mapped["User"] = relationship(back_populates="ownedItems")
+    owner: Mapped["User"] = relationship(back_populates="owned_items")
 
-    # Tự tham chiếu cho cấu trúc folder
     parent: Mapped["DriveItem | None"] = relationship(
-        back_populates="children", remote_side="DriveItem.itemId"
+        back_populates="children", remote_side="DriveItem.item_id"
     )
     children: Mapped[list["DriveItem"]] = relationship(back_populates="parent")
 
-    # One-to-one relationship
-    fileMetadata: Mapped["FileMetadata | None"] = relationship(
-        back_populates="driveItem"
+    file_metadata: Mapped["FileMetadata | None"] = relationship(
+        back_populates="drive_item"
     )
-
-    # One-to-many relationship
-    sharePermissions: Mapped[list["SharePermission"]] = relationship(
+    share_permissions: Mapped[list["SharePermission"]] = relationship(
         back_populates="item"
     )
 
-    # Unique constraint (ownerId, parentId, name)
+    # Unique constraint (owner_id, parent_id, name)
     __table_args__: tuple[UniqueConstraint] = (
-        UniqueConstraint("ownerId", "parentId", "name", name="uq_owner_parent_name"),
+        UniqueConstraint("owner_id", "parent_id", "name", name="uq_owner_parent_name"),
     )
 
 
 class FileMetadata(Base):
     """
     Stores metadata for items of type FILE.
+    All attributes are snake_case.
     """
 
     __tablename__: str = "file_metadata"
 
-    # This is both the Primary Key and the Foreign Key, enforcing a one-to-one
-    itemId: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("drive_items.itemId"), primary_key=True
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("drive_items.item_id"), primary_key=True
     )
 
-    mimeType: Mapped[str] = mapped_column(String(255))
+    mime_type: Mapped[str] = mapped_column(String(255))
     size: Mapped[int] = mapped_column(BigInteger)
-    storagePath: Mapped[str] = mapped_column(String(1024), unique=True)
-    documentType: Mapped[DocumentType | None] = mapped_column(SAEnum(DocumentType))
+    storage_path: Mapped[str] = mapped_column(String(1024), unique=True)
+    document_type: Mapped[DocumentType | None] = mapped_column(SAEnum(DocumentType))
     version: Mapped[int] = mapped_column(Integer, default=1)
-    createdAt: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    updatedAt: Mapped[datetime | None] = mapped_column(DateTime, onupdate=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, onupdate=func.now())
 
-    # Relations (back-populates for one-to-one)
-    driveItem: Mapped["DriveItem"] = relationship(back_populates="fileMetadata")
+    # Relations
+    drive_item: Mapped["DriveItem"] = relationship(back_populates="file_metadata")
 
 
 class SharePermission(Base):
     """
     Represents the permission granted to a user for a specific DriveItem.
+    All attributes are snake_case.
     """
 
     __tablename__: str = "share_permissions"
 
-    shareId: Mapped[uuid.UUID] = mapped_column(
+    share_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    permissionLevel: Mapped[ShareLevel] = mapped_column(SAEnum(ShareLevel))
-    createdAt: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    permission_level: Mapped[ShareLevel] = mapped_column(SAEnum(ShareLevel))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     # Foreign Keys
-    itemId: Mapped[uuid.UUID] = mapped_column(ForeignKey("drive_items.itemId"))
-    sharedWithUserId: Mapped[int] = mapped_column(ForeignKey("users.userId"))
+    item_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("drive_items.item_id"))
+    shared_with_user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
 
     # Relations
-    item: Mapped["DriveItem"] = relationship(back_populates="sharePermissions")
-    sharedWithUser: Mapped["User"] = relationship(back_populates="sharedWithMe")
+    item: Mapped["DriveItem"] = relationship(back_populates="share_permissions")
+    shared_with_user: Mapped["User"] = relationship(back_populates="shared_with_me")
 
-    # Unique constraint (itemId, sharedWithUserId)
+    # Unique constraint (item_id, shared_with_user_id)
     __table_args__: tuple[UniqueConstraint] = (
-        UniqueConstraint("itemId", "sharedWithUserId", name="uq_item_shared_user"),
+        UniqueConstraint("item_id", "shared_with_user_id", name="uq_item_shared_user"),
     )
