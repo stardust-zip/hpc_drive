@@ -500,3 +500,59 @@ def search_items(
         )
 
     return base_query.order_by(models.DriveItem.name).all()
+
+
+def admin_get_all_items(
+    db: Session, skip: int = 0, limit: int = 100
+) -> list[models.DriveItem]:
+    """
+    (Admin) Gets all drive items from all users.
+    """
+    return (
+        db.query(models.DriveItem)
+        .options(joinedload(models.DriveItem.file_metadata))
+        .order_by(models.DriveItem.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+
+def admin_get_item_by_id(db: Session, item_id: uuid.UUID) -> models.DriveItem:
+    """
+    (Admin) Gets a single drive item by its ID, regardless of owner.
+    """
+    db_item = (
+        db.query(models.DriveItem)
+        .options(joinedload(models.DriveItem.file_metadata))
+        .filter(models.DriveItem.item_id == item_id)
+        .first()
+    )
+
+    if not db_item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Item not found"
+        )
+    return db_item
+
+
+def admin_delete_item_permanently(db: Session, item_id: uuid.UUID):
+    """
+    (Admin) Permanently deletes an item from the database.
+    This is a destructive action.
+    """
+    db_item = admin_get_item_by_id(db, item_id)
+
+    # TODO: We must also delete the file from disk
+    # storage_path = db_item.file_metadata.storage_path
+
+    try:
+        db.delete(db_item)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete item: {e}",
+        )
+    return {"detail": "Item deleted permanently"}

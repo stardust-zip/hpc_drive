@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 # Import from our new database file
 from .database import create_db_and_tables
-from .api.v1 import router_drive
+from .api.v1 import router_drive, router_admin
 
 
 @asynccontextmanager
@@ -26,6 +26,7 @@ app = FastAPI(
 
 # Include the router
 app.include_router(router_drive.router, prefix="/api/v1")
+app.include_router(router_admin.router, prefix="/api/v1")
 
 
 @app.get("/health")
