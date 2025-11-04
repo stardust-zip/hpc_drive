@@ -100,7 +100,6 @@
               passlib
               bcrypt
               python-multipart
-              jwt
               pyjwt
 
               # Add whatever else you'd like here.
