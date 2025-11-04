@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
+from fastapi.middleware.cors import CORSMiddleware
 
 # Import from our new database file
 from .database import create_db_and_tables
@@ -17,12 +18,28 @@ async def lifespan(app: FastAPI):
     print("Shutting down...")
 
 
+origins = [
+    "http://localhost:3000", 
+    "http://localhost:3001",
+]
+
+
+
 app = FastAPI(
     title="HPC Drive Microservice",
     description="Drive service for the college management system",
     version="0.1.0",
     lifespan=lifespan,
 )
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"], # Allow all methods (GET, POST, etc.)
+    allow_headers=["*"], # Allow all headers (Authorization, Content-Type, etc.)
+)
+
 
 # Include the router
 app.include_router(router_drive.router, prefix="/api/v1")
