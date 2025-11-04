@@ -18,6 +18,8 @@ class StudentInfo(BaseModel):
     Matches the 'student_info' object
     """
 
+    model_config = ConfigDict(extra="ignore")
+
     student_code: str
 
 
@@ -25,6 +27,8 @@ class LecturerInfo(BaseModel):
     """
     Matches the 'lecturer_info' object
     """
+
+    model_config = ConfigDict(extra="ignore")
 
     lecturer_code: str
     # We only need the fields we plan to use
