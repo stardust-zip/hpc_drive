@@ -2,6 +2,7 @@ import uuid
 import shutil
 from pathlib import Path
 from fastapi import APIRouter, Depends, status, UploadFile, File, Form, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
@@ -86,6 +87,49 @@ def get_item_details(
     )
 
 
+@router.get("/items/{item_id}/download", response_class=FileResponse)
+def download_item(
+    item_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session),
+):
+    """
+    Downloads a file.
+    """
+    db_item = crud.get_drive_item(
+        db=db,
+        item_id=item_id,
+        user_id=current_user.user_id,
+    )
+
+    if db_item.item_type != "FILE":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only files can be downloaded",
+        )
+
+    if not db_item.file_metadata or not db_item.file_metadata.storage_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File not found",
+        )
+
+    # Construct the absolute path from the base uploads dir and the relative path
+    full_file_path = settings.UPLOADS_DIR / db_item.file_metadata.storage_path
+
+    if not full_file_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File not found on disk",
+        )
+
+    return FileResponse(
+        path=str(full_file_path),
+        filename=db_item.name,
+        media_type=db_item.file_metadata.mime_type,
+    )
+
+
 @router.post(
     "/upload",
     response_model=schemas.DriveItemResponse,
@@ -112,11 +156,13 @@ def upload_file(
 
     # 1. Define the storage path
     item_storage_id = uuid.uuid4()
-    user_upload_dir = (
-        settings.UPLOADS_DIR / str(current_user.user_id) / str(item_storage_id)
-    )
-    user_upload_dir.mkdir(parents=True, exist_ok=True)
-    storage_path = user_upload_dir / file.filename
+    # The relative path that will be stored in the database
+    relative_dir = Path(str(current_user.user_id)) / str(item_storage_id)
+    storage_dir = settings.UPLOADS_DIR / relative_dir
+
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    storage_path = storage_dir / file.filename
+    db_storage_path = relative_dir / file.filename
 
     # 2. Save the file to disk
     try:
@@ -142,12 +188,12 @@ def upload_file(
             parent_id=parent_id,
             mime_type=mime_type,  # Pass the guaranteed string
             size=file_size,
-            storage_path=str(storage_path),
+            storage_path=str(db_storage_path),
         )
         return db_item
     except HTTPException as e:
         storage_path.unlink()
-        user_upload_dir.rmdir()
+        storage_dir.rmdir()
         raise e
 
 
