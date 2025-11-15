@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict
-from .models import Permission, ShareLevel, ItemType
+from .models import Permission, ShareLevel, ItemType, UserRole
 
 
 class AuthAccount(BaseModel):
@@ -151,3 +151,15 @@ class DriveItemSearchQuery(BaseModel):
     name: str | None = None  # Search for a name containing this string
     item_type: ItemType | None = None  # Filter by FILE or FOLDER
     mime_type: str | None = None  # Filter by a specific MIME type
+
+
+class UserResponse(BaseModel):
+    """Schema for returning user info to an admin"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    user_id: int
+    username: str
+    email: str
+    role: UserRole
+    created_at: datetime

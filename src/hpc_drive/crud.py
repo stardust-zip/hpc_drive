@@ -700,3 +700,46 @@ def empty_user_trash(db: Session, owner_id: int):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to empty trash: {e}",
         )
+
+
+# admin
+def admin_get_all_users(db: Session) -> list[models.User]:
+    """
+    (Admin) Gets all users from the local DB.
+    """
+    return db.query(models.User).order_by(models.User.created_at.desc()).all()
+
+
+def admin_get_user_by_id(db: Session, user_id: int) -> models.User:
+    """
+    (Admin) Gets a single user by their ID.
+    """
+    db_user = db.get(models.User, user_id)
+    if not db_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+    return db_user
+
+
+def admin_get_items_for_user(
+    db: Session, user_id: int, parent_id: uuid.UUID | None
+) -> list[models.DriveItem]:
+    """
+    (Admin) Gets all non-trashed items for a specific user within a specific folder.
+    """
+    # Kiểm tra xem user có tồn tại không
+    admin_get_user_by_id(db, user_id)
+
+    # Lấy items giống như logic của user bình thường
+    return (
+        db.query(models.DriveItem)
+        .options(joinedload(models.DriveItem.file_metadata))
+        .filter(
+            models.DriveItem.owner_id == user_id,
+            models.DriveItem.parent_id == parent_id,
+            models.DriveItem.is_trashed == False,
+        )
+        .order_by(models.DriveItem.item_type, models.DriveItem.name)
+        .all()
+    )

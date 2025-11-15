@@ -8,13 +8,50 @@ from ...models import User
 from ...security import get_current_admin_user  # Import the new dependency
 from ... import crud, schemas
 
-router = APIRouter(prefix="/admin/drive", tags=["Admin - Drive"])
+router = APIRouter(prefix="/admin", tags=["Admin - Drive"])
 
 # We use 'Depends(get_current_admin_user)' on every endpoint
 # to lock this router down to admins only.
 
 
-@router.get("/items", response_model=List[schemas.DriveItemResponse])
+@router.get("/users", response_model=List[schemas.UserResponse])
+def get_all_users(
+    admin_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_session),
+):
+    """
+    [ADMIN] Get a list of all users in the drive service.
+    """
+    return crud.admin_get_all_users(db=db)
+
+
+@router.get("/users/{user_id}", response_model=schemas.UserResponse)
+def get_user_details(
+    user_id: int,
+    admin_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_session),
+):
+    """
+    [ADMIN] Get details for a specific user.
+    """
+    return crud.admin_get_user_by_id(db=db, user_id=user_id)
+
+
+@router.get("/users/{user_id}/items", response_model=schemas.DriveItemListResponse)
+def get_user_drive_items(
+    user_id: int,
+    parent_id: uuid.UUID | None = None,  # Pass as query parameter
+    admin_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_session),
+):
+    """
+    [ADMIN] List items in a specific user's drive.
+    """
+    items = crud.admin_get_items_for_user(db=db, user_id=user_id, parent_id=parent_id)
+    return {"parent_id": parent_id, "items": items}
+
+
+@router.get("/drive/items", response_model=List[schemas.DriveItemResponse])
 def get_all_items(
     skip: int = 0,
     limit: int = 100,
@@ -27,7 +64,7 @@ def get_all_items(
     return crud.admin_get_all_items(db=db, skip=skip, limit=limit)
 
 
-@router.get("/items/{item_id}", response_model=schemas.DriveItemResponse)
+@router.get("/drive/items/{item_id}", response_model=schemas.DriveItemResponse)
 def get_item_by_id(
     item_id: uuid.UUID,
     admin_user: User = Depends(get_current_admin_user),
@@ -39,7 +76,7 @@ def get_item_by_id(
     return crud.admin_get_item_by_id(db=db, item_id=item_id)
 
 
-@router.delete("/items/{item_id}", status_code=status.HTTP_200_OK)
+@router.delete("/drive/items/{item_id}", status_code=status.HTTP_200_OK)
 def delete_item_permanently(
     item_id: uuid.UUID,
     admin_user: User = Depends(get_current_admin_user),
