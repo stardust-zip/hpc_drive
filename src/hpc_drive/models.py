@@ -104,7 +104,7 @@ class DriveItem(Base):
     # Foreign Keys
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
     parent_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("drive_items.item_id")
+        ForeignKey("drive_items.item_id", ondelete="SET NULL")
     )
 
     # Relations
@@ -113,13 +113,15 @@ class DriveItem(Base):
     parent: Mapped["DriveItem | None"] = relationship(
         back_populates="children", remote_side="DriveItem.item_id"
     )
-    children: Mapped[list["DriveItem"]] = relationship(back_populates="parent")
+    children: Mapped[list["DriveItem"]] = relationship(
+        back_populates="parent", cascade="all, delete-orphan"
+    )
 
     file_metadata: Mapped["FileMetadata | None"] = relationship(
-        back_populates="drive_item"
+        back_populates="drive_item", cascade="all, delete-orphan"
     )
     share_permissions: Mapped[list["SharePermission"]] = relationship(
-        back_populates="item"
+        back_populates="item", cascade="all, delete-orphan"
     )
 
     # Unique constraint (owner_id, parent_id, name)
@@ -137,7 +139,7 @@ class FileMetadata(Base):
     __tablename__: str = "file_metadata"
 
     item_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("drive_items.item_id"), primary_key=True
+        ForeignKey("drive_items.item_id", ondelete="CASCADE"), primary_key=True
     )
 
     mime_type: Mapped[str] = mapped_column(String(255))
@@ -167,8 +169,12 @@ class SharePermission(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     # Foreign Keys
-    item_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("drive_items.item_id"))
-    shared_with_user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("drive_items.item_id", ondelete="CASCADE")
+    )
+    shared_with_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.user_id", ondelete="CASCADE")
+    )
 
     # Relations
     item: Mapped["DriveItem"] = relationship(back_populates="share_permissions")

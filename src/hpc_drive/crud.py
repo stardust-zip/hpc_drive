@@ -1,4 +1,5 @@
 import uuid
+from pathlib import Path
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import or_, func
@@ -7,6 +8,7 @@ from datetime import datetime
 
 from . import models, schemas
 from .models import ItemType, ShareLevel, Permission
+from .config import settings
 
 
 def create_drive_item(
@@ -556,3 +558,145 @@ def admin_delete_item_permanently(db: Session, item_id: uuid.UUID):
             detail=f"Failed to delete item: {e}",
         )
     return {"detail": "Item deleted permanently"}
+
+
+def _delete_file_from_storage(storage_path: str | None):
+    """
+    Helper: Xoá file vật lý khỏi disk.
+    storage_path là đường dẫn tương đối (vd: '2/uuid/file.txt')
+    """
+    if not storage_path:
+        return
+
+    try:
+        full_file_path = settings.UPLOADS_DIR / storage_path
+
+        if full_file_path.is_file():
+            full_file_path.unlink()  # Xoá file
+            # Cố gắng xoá thư mục cha (thư mục UUID)
+            try:
+                full_file_path.parent.rmdir()
+            except OSError:
+                # Thư mục không rỗng (lỗi) hoặc lỗi khác, bỏ qua
+                pass
+    except Exception as e:
+        # Ghi log lỗi này, nhưng không ngăn cản việc xoá DB
+        print(f"Error deleting file {storage_path} from disk: {e}")
+
+
+def get_trashed_item_for_owner(
+    db: Session, item_id: uuid.UUID, owner_id: int
+) -> models.DriveItem:
+    """
+    Helper: Lấy một item NẾU nó nằm trong thùng rác VÀ thuộc sở hữu của user.
+    """
+    db_item = (
+        db.query(models.DriveItem)
+        .options(joinedload(models.DriveItem.file_metadata))  # Load sẵn metadata
+        .filter(
+            models.DriveItem.item_id == item_id,
+            models.DriveItem.owner_id == owner_id,
+            models.DriveItem.is_trashed == True,  # Phải ở trong thùng rác
+        )
+        .first()
+    )
+
+    if not db_item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Item not found in trash or you do not have permission",
+        )
+    return db_item
+
+
+def delete_item_permanently(db: Session, item_id: uuid.UUID, owner_id: int):
+    """
+    (User) Xoá vĩnh viễn một item (và các con của nó) khỏi thùng rác.
+    """
+    db_item = get_trashed_item_for_owner(db, item_id, owner_id)
+
+    # Nếu là file, xoá file vật lý
+    if db_item.item_type == ItemType.FILE and db_item.file_metadata:
+        _delete_file_from_storage(db_item.file_metadata.storage_path)
+
+    # Nếu là thư mục, các file con của nó sẽ bị xoá bởi
+    # quy tắc 'ondelete="CASCADE"' và 'cascade="all, delete-orphan"' trong models.py
+    #
+    # Chúng ta vẫn cần xoá các file vật lý của các con
+    if db_item.item_type == ItemType.FOLDER:
+        # Cần tìm tất cả các file con bên trong
+        item_queue = [db_item]
+        items_to_check = []
+
+        while item_queue:
+            current_item = item_queue.pop(0)
+            items_to_check.append(current_item)
+
+            if current_item.item_type == ItemType.FOLDER:
+                children = (
+                    db.query(models.DriveItem)
+                    .options(joinedload(models.DriveItem.file_metadata))
+                    .filter(models.DriveItem.parent_id == current_item.item_id)
+                    .all()
+                )
+                item_queue.extend(children)
+
+        # Xoá file vật lý của tất cả các file con
+        for item in items_to_check:
+            if item.item_type == ItemType.FILE and item.file_metadata:
+                _delete_file_from_storage(item.file_metadata.storage_path)
+
+    # Xoá item khỏi DB (và cascade)
+    try:
+        db.delete(db_item)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete item: {e}",
+        )
+
+
+def empty_user_trash(db: Session, owner_id: int):
+    """
+    (User) Dọn sạch thùng rác của user.
+    """
+    # 1. Tìm tất cả các item trong thùng rác của user (bao gồm file và thư mục)
+    all_trashed_items = (
+        db.query(models.DriveItem)
+        .options(joinedload(models.DriveItem.file_metadata))
+        .filter(
+            models.DriveItem.owner_id == owner_id,
+            models.DriveItem.is_trashed == True,
+        )
+        .all()
+    )
+
+    if not all_trashed_items:
+        return  # Không có gì để xoá
+
+    # 2. Xoá tất cả các file vật lý
+    for item in all_trashed_items:
+        if item.item_type == ItemType.FILE and item.file_metadata:
+            _delete_file_from_storage(item.file_metadata.storage_path)
+
+    # 3. Xoá tất cả các item khỏi DB (cascade sẽ xử lý)
+    # Chúng ta chỉ cần xoá các item ở cấp cao nhất trong thùng rác
+    top_level_trashed_items = [
+        item
+        for item in all_trashed_items
+        if item.parent_id is None or (item.parent and not item.parent.is_trashed)
+    ]
+
+    try:
+        for item in top_level_trashed_items:
+            db.delete(item)
+
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to empty trash: {e}",
+        )

@@ -2,7 +2,7 @@ import uuid
 import shutil
 from pathlib import Path
 from fastapi import APIRouter, Depends, status, UploadFile, File, Form, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
@@ -317,3 +317,29 @@ def search_drive_items(
     - `/search?name=budget&item_type=FILE&mime_type=pdf`
     """
     return crud.search_items(db=db, user_id=current_user.user_id, query=query)
+
+
+@router.delete("/trash/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+def permanently_delete_item(
+    item_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session),
+):
+    """
+    Permanently deletes a single item from the user's trash.
+    This is irreversible and will delete files from disk.
+    """
+    crud.delete_item_permanently(db=db, item_id=item_id, owner_id=current_user.user_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete("/trash", status_code=status.HTTP_204_NO_CONTENT)
+def empty_trash(
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_session)
+):
+    """
+    Permanently deletes all items from the user's trash.
+    This is irreversible and will delete files from disk.
+    """
+    crud.empty_user_trash(db=db, owner_id=current_user.user_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
