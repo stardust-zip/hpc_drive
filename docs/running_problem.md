@@ -330,7 +330,7 @@ services:
         container_name: hpc_web
         restart: unless-stopped
         ports:
-            - "8080:80"
+            - "8082:80"
         volumes:
             - .:/var/www
             - ./nginx.conf:/etc/nginx/conf.d/default.conf
@@ -378,7 +378,7 @@ services:
             - app
             - redis
         ports:
-            - "8081:8080"
+            - "8081:8082"
         networks:
             - hpc_network
 
