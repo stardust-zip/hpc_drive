@@ -11,8 +11,14 @@ services:
       - uploads_data:/app/src/hpc_drive/uploads # Persistent volume for uploaded files
     environment:
       DATABASE_URL: "sqlite:////app/data/drive.db"
-      AUTH_SERVICE_ME_URL: "http://auth_service:8080/api/v1/me"
+      AUTH_SERVICE_ME_URL: "http://hpc_web:80/api/v1/me"
+    networks:
+      - system-management_hpc_network
     restart: unless-stopped
+
+networks:
+  system-management_hpc_network:
+    external: true
 
 volumes:
   drive_data: # Volume for the SQLite database (drive.db)
