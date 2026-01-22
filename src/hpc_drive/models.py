@@ -54,6 +54,40 @@ class DocumentType(str, Enum):
     OTHER = "OTHER"
 
 
+# ===== NEW ENUMS FOR PHASE 1 =====
+
+
+class RepositoryType(str, Enum):
+    """Type of repository where the item is stored."""
+    PERSONAL = "PERSONAL"
+    CLASS = "CLASS"
+    DEPARTMENT = "DEPARTMENT"
+
+
+class OwnerType(str, Enum):
+    """Type of owner for quick permission checks."""
+    STUDENT = "STUDENT"
+    LECTURER = "LECTURER"
+    ADMIN = "ADMIN"
+
+
+class ProcessStatus(str, Enum):
+    """Processing status for malware scanning workflow."""
+    PENDING_UPLOAD = "PENDING_UPLOAD"
+    SCANNING = "SCANNING"
+    READY = "READY"
+    INFECTED = "INFECTED"
+    ERROR = "ERROR"
+
+
+class SigningStatus(str, Enum):
+    """Status of signing request workflow."""
+    DRAFT = "DRAFT"
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
 # --- Models (CONVERTED TO SNAKE_CASE) ---
 
 
@@ -100,6 +134,26 @@ class DriveItem(Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, onupdate=func.now())
+
+    # ===== NEW FIELDS FOR PHASE 1 =====
+    
+    # Repository type and context
+    repository_type: Mapped[RepositoryType] = mapped_column(
+        SAEnum(RepositoryType), default=RepositoryType.PERSONAL
+    )
+    repository_context_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    
+    # Owner type for quick permission checks
+    owner_type: Mapped[OwnerType] = mapped_column(SAEnum(OwnerType))
+    
+    # Process status for malware scanning
+    process_status: Mapped[ProcessStatus] = mapped_column(
+        SAEnum(ProcessStatus), default=ProcessStatus.PENDING_UPLOAD
+    )
+    
+    # System-generated folder management
+    is_system_generated: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_locked: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Foreign Keys
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
@@ -184,3 +238,49 @@ class SharePermission(Base):
     __table_args__: tuple[UniqueConstraint] = (
         UniqueConstraint("item_id", "shared_with_user_id", name="uq_item_shared_user"),
     )
+
+
+class SigningRequest(Base):
+    """
+    Represents a signing request for PDF documents.
+    Lecturers create requests, Admins approve/reject.
+    All attributes are snake_case.
+    """
+
+    __tablename__: str = "signing_requests"
+
+    request_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    
+    # Current status of the signing request
+    current_status: Mapped[SigningStatus] = mapped_column(
+        SAEnum(SigningStatus), default=SigningStatus.DRAFT
+    )
+    
+    # Admin comment when approving/rejecting
+    admin_comment: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    
+    # Path to signed file after approval
+    signed_file_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, onupdate=func.now())
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # Foreign Keys
+    drive_item_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("drive_items.item_id", ondelete="CASCADE")
+    )
+    requester_id: Mapped[int] = mapped_column(
+        ForeignKey("users.user_id", ondelete="CASCADE")
+    )
+    approver_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Relations
+    drive_item: Mapped["DriveItem"] = relationship()
+    requester: Mapped["User"] = relationship(foreign_keys=[requester_id])
+    approver: Mapped["User | None"] = relationship(foreign_keys=[approver_id])

@@ -5,7 +5,10 @@ from pathlib import Path
 class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./drive.db"
 
-    AUTH_SERVICE_ME_URL: str = "http://localhost:8082/api/v1/me"
+    AUTH_SERVICE_ME_URL: str = "http://localhost:8080/api/v1/me"  # Fixed: 8080 not 8082
+    
+    # File storage directory
+    UPLOAD_DIR: str = "uploads"
 
     class Config:
         env_file: str = ".env"

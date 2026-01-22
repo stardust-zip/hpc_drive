@@ -1,10 +1,12 @@
-from fastapi import FastAPI
 from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+from .api.v1 import router_admin, router_drive, router_class_storage, router_department_storage, router_signing
 
 # Import from our new database file
 from .database import create_db_and_tables
-from .api.v1 import router_drive, router_admin
 
 
 @asynccontextmanager
@@ -19,10 +21,9 @@ async def lifespan(app: FastAPI):
 
 
 origins = [
-    "http://localhost:3000", 
+    "http://localhost:3000",
     "http://localhost:3001",
 ]
-
 
 
 app = FastAPI(
@@ -36,14 +37,17 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"], # Allow all methods (GET, POST, etc.)
-    allow_headers=["*"], # Allow all headers (Authorization, Content-Type, etc.)
+    allow_methods=["*"],  # Allow all methods (GET, POST, etc.)
+    allow_headers=["*"],  # Allow all headers (Authorization, Content-Type, etc.)
 )
 
 
-# Include the router
+# Include the routers
 app.include_router(router_drive.router, prefix="/api/v1")
 app.include_router(router_admin.router, prefix="/api/v1")
+app.include_router(router_class_storage.router, prefix="/api/v1")
+app.include_router(router_department_storage.router, prefix="/api/v1")  # NEW
+app.include_router(router_signing.router, prefix="/api/v1")  # NEW
 
 
 @app.get("/health")

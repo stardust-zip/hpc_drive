@@ -3,12 +3,12 @@ alembic
 bcrypt
 email-validator
 fastapi
-httpx
 passlib
 pydantic
 pydantic-settings
 PyJWT
 python-dotenv
+httpx  # For System-Management API integration
 python-jose
 python-multipart
 requests

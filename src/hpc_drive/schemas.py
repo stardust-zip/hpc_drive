@@ -1,7 +1,9 @@
 import uuid
 from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict
-from .models import Permission, ShareLevel, ItemType, UserRole
+
+from .models import ItemType, Permission, ShareLevel, UserRole
 
 
 class AuthAccount(BaseModel):
