@@ -1,29 +1,40 @@
 import uuid
-from pathlib import Path
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy import or_, func
-from fastapi import HTTPException, status
 from datetime import datetime
+from pathlib import Path
+
+from fastapi import HTTPException, status
+from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session, joinedload
 
 from . import models, schemas
-from .models import ItemType, ShareLevel, Permission
-from .config import settings
+from .models import ItemType, OwnerType, Permission, ShareLevel, UserRole
+
+
+def get_owner_type(role: UserRole) -> OwnerType:
+    if role == UserRole.ADMIN:
+        return OwnerType.ADMIN
+    if role == UserRole.TEACHER:
+        return OwnerType.LECTURER
+    return OwnerType.STUDENT
 
 
 def create_drive_item(
-    db: Session, item: schemas.DriveItemCreate, owner_id: int
+    db: Session, item: schemas.DriveItemCreate, owner: models.User
 ) -> models.DriveItem:
     """
     Creates a new DriveItem (FILE or FOLDER) in the database.
+    Requires the full owner object to determine owner_type.
     """
+    owner_type = get_owner_type(owner.role)
 
     # Create the new item instance
     db_item = models.DriveItem(
         name=item.name,
         item_type=item.item_type,
         parent_id=item.parent_id,
-        owner_id=owner_id,
+        owner_id=owner.user_id,
+        owner_type=owner_type,
     )
 
     db.add(db_item)
@@ -32,8 +43,9 @@ def create_drive_item(
         db.commit()
         db.refresh(db_item)
         return db_item
-    except IntegrityError:
+    except IntegrityError as e:
         db.rollback()
+        print(f"Database integrity error: {e}")
         # This catches our unique constraint (uq_owner_parent_name)
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -61,36 +73,9 @@ def get_user_items_in_folder(
     )
 
 
-def get_drive_item(
-    db: Session,
-    item_id: uuid.UUID,
-    owner_id: int,  # We need this to check permission
-) -> models.DriveItem:
-    """
-    Gets a single drive item, checking for ownership.
-    """
-    db_item = (
-        db.query(models.DriveItem)
-        .options(joinedload(models.DriveItem.file_metadata))
-        .filter(models.DriveItem.item_id == item_id)
-        .first()
-    )
-
-    if not db_item:
-        raise HTTPException(status_code=404, detail="Item not found")
-
-    # TODO: Add logic for shared items
-    if db_item.owner_id != owner_id:
-        raise HTTPException(
-            status_code=403, detail="You do not have permission to access this item"
-        )
-
-    return db_item
-
-
 def create_file_with_metadata(
     db: Session,
-    owner_id: int,
+    owner: models.User,
     filename: str,
     parent_id: uuid.UUID | None,
     mime_type: str,
@@ -99,14 +84,18 @@ def create_file_with_metadata(
 ) -> models.DriveItem:
     """
     Atomically creates a DriveItem (as FILE) and its FileMetadata.
+    Requires the full owner object to determine owner_type.
     """
+
+    owner_type = get_owner_type(owner.role)
 
     # 1. Create the DriveItem
     db_item = models.DriveItem(
         name=filename,
-        item_type=ItemType.FILE,  # Use the enum
+        item_type=ItemType.FILE,
         parent_id=parent_id,
-        owner_id=owner_id,
+        owner_id=owner.user_id,
+        owner_type=owner_type,
     )
     db.add(db_item)
 
@@ -157,7 +146,8 @@ def get_item_for_owner(
     db_item = (
         db.query(models.DriveItem)
         .filter(
-            models.DriveItem.item_id == item_id, models.DriveItem.owner_id == owner_id
+            models.DriveItem.item_id == item_id,
+            models.DriveItem.owner_id == owner_id,
         )
         .first()
     )
@@ -181,9 +171,6 @@ def trash_item(db: Session, item_id: uuid.UUID, owner_id: int) -> models.DriveIt
             status_code=status.HTTP_400_BAD_REQUEST, detail="Item is already in trash"
         )
 
-    # TODO: We need to handle recursive trashing for folders.
-    # For now, we'll just trash the single item.
-
     db_item.is_trashed = True
     db_item.trashed_at = datetime.utcnow()
 
@@ -203,8 +190,6 @@ def restore_item(db: Session, item_id: uuid.UUID, owner_id: int) -> models.Drive
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Item is not in trash"
         )
-
-    # TODO: We need to handle recursive restoring for folders.
 
     db_item.is_trashed = False
     db_item.trashed_at = None
@@ -267,10 +252,8 @@ def update_drive_item(
     db_item = get_item_for_owner(db, item_id, owner_id)
 
     if update_data.name is None and update_data.parent_id is None:
-        # Nothing to update
         return db_item
 
-    # Determine the final name and parent_id
     new_name = update_data.name if update_data.name is not None else db_item.name
     new_parent_id = (
         update_data.parent_id
@@ -279,24 +262,20 @@ def update_drive_item(
     )
 
     if new_name == db_item.name and new_parent_id == db_item.parent_id:
-        # No actual change
         return db_item
 
-    # Check for name conflicts BEFORE making the change
     check_for_name_conflict(
         db=db,
         owner_id=owner_id,
         parent_id=new_parent_id,
         name=new_name,
-        exclude_item_id=item_id,  # Exclude self if parent_id is unchanged
+        exclude_item_id=item_id,
     )
 
-    # Apply the changes
     if update_data.name is not None:
         db_item.name = update_data.name
 
     if update_data.parent_id is not None:
-        # TODO: Check if moving a folder into its own descendant
         db_item.parent_id = update_data.parent_id
 
     db_item.updated_at = datetime.utcnow()
@@ -307,7 +286,6 @@ def update_drive_item(
         db.refresh(db_item)
         return db_item
     except IntegrityError:
-        # This is a final fallback, though check_for_name_conflict should catch it
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -322,7 +300,6 @@ def update_drive_item(
 
 
 def get_user_by_username(db: Session, username: str) -> models.User | None:
-    """Finds a user by their username."""
     return db.query(models.User).filter(models.User.username == username).first()
 
 
@@ -332,10 +309,7 @@ def share_item(
     """
     Shares an item with another user.
     """
-    # 1. Verify the current user owns the item
     db_item = get_item_for_owner(db, item_id, owner_id)
-
-    # 2. Find the user to share with
     user_to_share_with = get_user_by_username(db, share_data.username)
 
     if not user_to_share_with:
@@ -350,7 +324,6 @@ def share_item(
             detail="You cannot share an item with yourself",
         )
 
-    # 3. Check if it's already shared with this user
     existing_share = (
         db.query(models.SharePermission)
         .filter(
@@ -366,19 +339,17 @@ def share_item(
             detail=f"Item is already shared with {share_data.username}",
         )
 
-    # 4. Create the SharePermission record (default to VIEWER)
     db_share = models.SharePermission(
         item_id=item_id,
         shared_with_user_id=user_to_share_with.user_id,
-        permission_level=ShareLevel.VIEWER,  # Default as requested
+        permission_level=ShareLevel.VIEWER,
     )
 
-    # 5. Update the item's main permission status to SHARED
     db_item.permission = Permission.SHARED
 
     try:
         db.add(db_share)
-        db.add(db_item)  # Add the updated item as well
+        db.add(db_item)
         db.commit()
         db.refresh(db_share)
         return db_share
@@ -391,10 +362,6 @@ def share_item(
 
 
 def get_shared_with_me_items(db: Session, user_id: int) -> list[models.DriveItem]:
-    """
-    Gets all items that have been shared with the current user.
-    """
-    # Find all DriveItems linked to SharePermission records for this user
     return (
         db.query(models.DriveItem)
         .join(models.SharePermission)
@@ -405,19 +372,13 @@ def get_shared_with_me_items(db: Session, user_id: int) -> list[models.DriveItem
     )
 
 
-# --- MODIFIED: get_drive_item ---
-
-
 def get_drive_item(
     db: Session,
     item_id: uuid.UUID,
-    user_id: int,  # Renamed from owner_id to reflect new logic
+    user_id: int,
 ) -> models.DriveItem:
     """
     Gets a single drive item.
-    A user can access if:
-    1. They are the owner.
-    2. The item has a SharePermission for them.
     """
     db_item = (
         db.query(models.DriveItem)
@@ -430,14 +391,11 @@ def get_drive_item(
         raise HTTPException(status_code=404, detail="Item not found")
 
     if db_item.is_trashed and db_item.owner_id != user_id:
-        # Only the owner can see their own trashed items
         raise HTTPException(status_code=404, detail="Item not found")
 
-    # Check for ownership
     if db_item.owner_id == user_id:
         return db_item
 
-    # Check for share permission
     is_shared_with_user = (
         db.query(models.SharePermission)
         .filter(
@@ -448,10 +406,8 @@ def get_drive_item(
     )
 
     if is_shared_with_user:
-        # As per requirement, shared users can "view"
         return db_item
 
-    # If neither, they don't have permission
     raise HTTPException(
         status_code=403, detail="You do not have permission to access this item"
     )
@@ -461,17 +417,8 @@ def search_items(
     db: Session, user_id: int, query: schemas.DriveItemSearchQuery
 ) -> list[models.DriveItem]:
     """
-    Searches for items based on a set of criteria.
-
-    A user can find:
-    1. Items they own.
-    2. Items shared with them.
-
-    Filters are applied on top of this.
+    Searches for items across owned and shared items.
     """
-
-    # Base query: Find all items the user has access to
-    # (owned OR shared with them) and are not in the trash.
     base_query = (
         db.query(models.DriveItem)
         .outerjoin(models.SharePermission)
@@ -484,19 +431,15 @@ def search_items(
         )
         .options(joinedload(models.DriveItem.file_metadata))
         .distinct()
-    )  # Use distinct to avoid duplicates if owned AND shared
-
-    # --- Apply Dynamic Filters ---
+    )
 
     if query.name:
-        # Use 'ilike' for case-insensitive partial matching
         base_query = base_query.filter(models.DriveItem.name.ilike(f"%{query.name}%"))
 
     if query.item_type:
         base_query = base_query.filter(models.DriveItem.item_type == query.item_type)
 
     if query.mime_type:
-        # This filter only works for files, so we join FileMetadata
         base_query = base_query.join(models.FileMetadata).filter(
             models.FileMetadata.mime_type.ilike(f"%{query.mime_type}%")
         )
@@ -507,9 +450,6 @@ def search_items(
 def admin_get_all_items(
     db: Session, skip: int = 0, limit: int = 100
 ) -> list[models.DriveItem]:
-    """
-    (Admin) Gets all drive items from all users.
-    """
     return (
         db.query(models.DriveItem)
         .options(joinedload(models.DriveItem.file_metadata))
@@ -521,9 +461,6 @@ def admin_get_all_items(
 
 
 def admin_get_item_by_id(db: Session, item_id: uuid.UUID) -> models.DriveItem:
-    """
-    (Admin) Gets a single drive item by its ID, regardless of owner.
-    """
     db_item = (
         db.query(models.DriveItem)
         .options(joinedload(models.DriveItem.file_metadata))
@@ -539,15 +476,7 @@ def admin_get_item_by_id(db: Session, item_id: uuid.UUID) -> models.DriveItem:
 
 
 def admin_delete_item_permanently(db: Session, item_id: uuid.UUID):
-    """
-    (Admin) Permanently deletes an item from the database.
-    This is a destructive action.
-    """
     db_item = admin_get_item_by_id(db, item_id)
-
-    # TODO: We must also delete the file from disk
-    # storage_path = db_item.file_metadata.storage_path
-
     try:
         db.delete(db_item)
         db.commit()
@@ -561,42 +490,31 @@ def admin_delete_item_permanently(db: Session, item_id: uuid.UUID):
 
 
 def _delete_file_from_storage(storage_path: str | None):
-    """
-    Helper: Xoá file vật lý khỏi disk.
-    storage_path là đường dẫn tương đối (vd: '2/uuid/file.txt')
-    """
     if not storage_path:
         return
 
     try:
-        full_file_path = settings.UPLOADS_DIR / storage_path
-
+        full_file_path = models.settings.UPLOADS_DIR / storage_path
         if full_file_path.is_file():
-            full_file_path.unlink()  # Xoá file
-            # Cố gắng xoá thư mục cha (thư mục UUID)
+            full_file_path.unlink()
             try:
                 full_file_path.parent.rmdir()
             except OSError:
-                # Thư mục không rỗng (lỗi) hoặc lỗi khác, bỏ qua
                 pass
     except Exception as e:
-        # Ghi log lỗi này, nhưng không ngăn cản việc xoá DB
         print(f"Error deleting file {storage_path} from disk: {e}")
 
 
 def get_trashed_item_for_owner(
     db: Session, item_id: uuid.UUID, owner_id: int
 ) -> models.DriveItem:
-    """
-    Helper: Lấy một item NẾU nó nằm trong thùng rác VÀ thuộc sở hữu của user.
-    """
     db_item = (
         db.query(models.DriveItem)
-        .options(joinedload(models.DriveItem.file_metadata))  # Load sẵn metadata
+        .options(joinedload(models.DriveItem.file_metadata))
         .filter(
             models.DriveItem.item_id == item_id,
             models.DriveItem.owner_id == owner_id,
-            models.DriveItem.is_trashed == True,  # Phải ở trong thùng rác
+            models.DriveItem.is_trashed == True,
         )
         .first()
     )
@@ -610,21 +528,12 @@ def get_trashed_item_for_owner(
 
 
 def delete_item_permanently(db: Session, item_id: uuid.UUID, owner_id: int):
-    """
-    (User) Xoá vĩnh viễn một item (và các con của nó) khỏi thùng rác.
-    """
     db_item = get_trashed_item_for_owner(db, item_id, owner_id)
 
-    # Nếu là file, xoá file vật lý
     if db_item.item_type == ItemType.FILE and db_item.file_metadata:
         _delete_file_from_storage(db_item.file_metadata.storage_path)
 
-    # Nếu là thư mục, các file con của nó sẽ bị xoá bởi
-    # quy tắc 'ondelete="CASCADE"' và 'cascade="all, delete-orphan"' trong models.py
-    #
-    # Chúng ta vẫn cần xoá các file vật lý của các con
     if db_item.item_type == ItemType.FOLDER:
-        # Cần tìm tất cả các file con bên trong
         item_queue = [db_item]
         items_to_check = []
 
@@ -641,12 +550,10 @@ def delete_item_permanently(db: Session, item_id: uuid.UUID, owner_id: int):
                 )
                 item_queue.extend(children)
 
-        # Xoá file vật lý của tất cả các file con
         for item in items_to_check:
             if item.item_type == ItemType.FILE and item.file_metadata:
                 _delete_file_from_storage(item.file_metadata.storage_path)
 
-    # Xoá item khỏi DB (và cascade)
     try:
         db.delete(db_item)
         db.commit()
@@ -659,10 +566,6 @@ def delete_item_permanently(db: Session, item_id: uuid.UUID, owner_id: int):
 
 
 def empty_user_trash(db: Session, owner_id: int):
-    """
-    (User) Dọn sạch thùng rác của user.
-    """
-    # 1. Tìm tất cả các item trong thùng rác của user (bao gồm file và thư mục)
     all_trashed_items = (
         db.query(models.DriveItem)
         .options(joinedload(models.DriveItem.file_metadata))
@@ -674,15 +577,12 @@ def empty_user_trash(db: Session, owner_id: int):
     )
 
     if not all_trashed_items:
-        return  # Không có gì để xoá
+        return
 
-    # 2. Xoá tất cả các file vật lý
     for item in all_trashed_items:
         if item.item_type == ItemType.FILE and item.file_metadata:
             _delete_file_from_storage(item.file_metadata.storage_path)
 
-    # 3. Xoá tất cả các item khỏi DB (cascade sẽ xử lý)
-    # Chúng ta chỉ cần xoá các item ở cấp cao nhất trong thùng rác
     top_level_trashed_items = [
         item
         for item in all_trashed_items
@@ -692,7 +592,6 @@ def empty_user_trash(db: Session, owner_id: int):
     try:
         for item in top_level_trashed_items:
             db.delete(item)
-
         db.commit()
     except Exception as e:
         db.rollback()
@@ -702,18 +601,11 @@ def empty_user_trash(db: Session, owner_id: int):
         )
 
 
-# admin
 def admin_get_all_users(db: Session) -> list[models.User]:
-    """
-    (Admin) Gets all users from the local DB.
-    """
     return db.query(models.User).order_by(models.User.created_at.desc()).all()
 
 
 def admin_get_user_by_id(db: Session, user_id: int) -> models.User:
-    """
-    (Admin) Gets a single user by their ID.
-    """
     db_user = db.get(models.User, user_id)
     if not db_user:
         raise HTTPException(
@@ -725,13 +617,7 @@ def admin_get_user_by_id(db: Session, user_id: int) -> models.User:
 def admin_get_items_for_user(
     db: Session, user_id: int, parent_id: uuid.UUID | None
 ) -> list[models.DriveItem]:
-    """
-    (Admin) Gets all non-trashed items for a specific user within a specific folder.
-    """
-    # Kiểm tra xem user có tồn tại không
     admin_get_user_by_id(db, user_id)
-
-    # Lấy items giống như logic của user bình thường
     return (
         db.query(models.DriveItem)
         .options(joinedload(models.DriveItem.file_metadata))

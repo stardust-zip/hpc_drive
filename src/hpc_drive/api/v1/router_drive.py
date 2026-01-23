@@ -1,17 +1,19 @@
-import uuid
 import shutil
+import uuid
 from pathlib import Path
-from fastapi import APIRouter, Depends, status, UploadFile, File, Form, HTTPException
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
-from typing import List, Optional
+
+from ... import crud, schemas
+from ...config import settings
 
 # Updated imports
 from ...database import get_session
 from ...models import User
 from ...security import get_current_user, get_current_user_data_from_auth
-from ... import crud, schemas
-from ...config import settings
 
 router = APIRouter(prefix="/drive", tags=["Drive"])
 
@@ -42,17 +44,9 @@ def create_item(
     """
     Create a new drive item (FILE or FOLDER) in the root
     or inside a parent folder.
-
-    **Body Example (JSON):**
-    ```json
-    {
-        "name": "My New Folder",
-        "item_type": "FOLDER",
-        "parent_id": null
-    }
-    ```
     """
-    return crud.create_drive_item(db=db, item=item, owner_id=current_user.user_id)
+    # Passing 'current_user' object so CRUD can determine OwnerType
+    return crud.create_drive_item(db=db, item=item, owner=current_user)
 
 
 @router.get("/items", response_model=schemas.DriveItemListResponse)
@@ -83,7 +77,7 @@ def get_item_details(
     return crud.get_drive_item(
         db=db,
         item_id=item_id,
-        user_id=current_user.user_id,  # Use the modified CRUD function
+        user_id=current_user.user_id,
     )
 
 
@@ -143,13 +137,6 @@ def upload_file(
 ):
     """
     Uploads a file. This endpoint accepts multipart/form-data.
-
-    The file is saved to a user-specific directory, and both a
-    DriveItem and a FileMetadata record are created.
-
-    **Body (form-data):**
-    - `file`: The file to upload (e.g., `my_document.pdf`)
-    - `parent_id`: (Optional) The UUID of the parent folder.
     """
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file name provided")
@@ -183,17 +170,20 @@ def upload_file(
     try:
         db_item = crud.create_file_with_metadata(
             db=db,
-            owner_id=current_user.user_id,
+            owner=current_user,  # Pass the user object here
             filename=file.filename,
             parent_id=parent_id,
-            mime_type=mime_type,  # Pass the guaranteed string
+            mime_type=mime_type,
             size=file_size,
             storage_path=str(db_storage_path),
         )
         return db_item
     except HTTPException as e:
-        storage_path.unlink()
-        storage_dir.rmdir()
+        # Cleanup if DB insert fails
+        if storage_path.exists():
+            storage_path.unlink()
+        if storage_dir.exists():
+            storage_dir.rmdir()
         raise e
 
 
@@ -203,10 +193,6 @@ def move_item_to_trash(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_session),
 ):
-    """
-    Moves an item to the trash (sets is_trashed = True).
-    (No request body)
-    """
     return crud.trash_item(db=db, item_id=item_id, owner_id=current_user.user_id)
 
 
@@ -216,10 +202,6 @@ def restore_item_from_trash(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_session),
 ):
-    """
-    Restores an item from the trash (sets is_trashed = False).
-    (No request body)
-    """
     return crud.restore_item(db=db, item_id=item_id, owner_id=current_user.user_id)
 
 
@@ -227,9 +209,6 @@ def restore_item_from_trash(
 def get_trashed_items(
     current_user: User = Depends(get_current_user), db: Session = Depends(get_session)
 ):
-    """
-    Lists all items belonging to the user that are in the trash.
-    """
     return crud.get_user_trash(db=db, owner_id=current_user.user_id)
 
 
@@ -240,23 +219,6 @@ def update_item_details(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_session),
 ):
-    """
-    Updates an item's details, such as its name or parent folder.
-
-    **Body Example (JSON) - To rename:**
-    ```json
-    {
-        "name": "My Renamed Folder"
-    }
-    ```
-
-    **Body Example (JSON) - To move:**
-    ```json
-    {
-        "parent_id": "a1b2c3d4-..."
-    }
-    ```
-    """
     return crud.update_drive_item(
         db=db, item_id=item_id, owner_id=current_user.user_id, update_data=update_data
     )
@@ -265,7 +227,7 @@ def update_item_details(
 @router.post(
     "/items/{item_id}/share",
     response_model=schemas.SharePermissionResponse,
-    tags=["Sharing"],  # Add a new tag
+    tags=["Sharing"],
 )
 def share_an_item(
     item_id: uuid.UUID,
@@ -273,17 +235,6 @@ def share_an_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_session),
 ):
-    """
-    Shares an item you own with another user (by username).
-    Currently defaults to VIEWER permission.
-
-    **Body Example (JSON):**
-    ```json
-    {
-        "username": "gv_GV001"
-    }
-    ```
-    """
     return crud.share_item(
         db=db, item_id=item_id, owner_id=current_user.user_id, share_data=share_data
     )
@@ -295,9 +246,6 @@ def share_an_item(
 def get_items_shared_with_me(
     current_user: User = Depends(get_current_user), db: Session = Depends(get_session)
 ):
-    """
-    Lists all items that have been shared with the current user.
-    """
     return crud.get_shared_with_me_items(db=db, user_id=current_user.user_id)
 
 
@@ -305,17 +253,8 @@ def get_items_shared_with_me(
 def search_drive_items(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_session),
-    query: schemas.DriveItemSearchQuery = Depends(),  # Injects query params
+    query: schemas.DriveItemSearchQuery = Depends(),
 ):
-    """
-    Searches for items across the user's drive (owned and shared)
-    based on optional query parameters.
-
-    **Query Parameter Examples:**
-    - `/search?name=report`
-    - `/search?item_type=FILE`
-    - `/search?name=budget&item_type=FILE&mime_type=pdf`
-    """
     return crud.search_items(db=db, user_id=current_user.user_id, query=query)
 
 
@@ -325,10 +264,6 @@ def permanently_delete_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_session),
 ):
-    """
-    Permanently deletes a single item from the user's trash.
-    This is irreversible and will delete files from disk.
-    """
     crud.delete_item_permanently(db=db, item_id=item_id, owner_id=current_user.user_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -337,9 +272,5 @@ def permanently_delete_item(
 def empty_trash(
     current_user: User = Depends(get_current_user), db: Session = Depends(get_session)
 ):
-    """
-    Permanently deletes all items from the user's trash.
-    This is irreversible and will delete files from disk.
-    """
     crud.empty_user_trash(db=db, owner_id=current_user.user_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
