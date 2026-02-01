@@ -3,7 +3,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api.v1 import router_admin, router_drive, router_class_storage, router_department_storage, router_signing
+from .api.v1 import (
+    router_admin,
+    router_class_storage,
+    router_curriculum,
+    router_department_storage,
+    router_drive,
+    router_signing,
+)
 
 # Import from our new database file
 from .database import create_db_and_tables
@@ -48,6 +55,7 @@ app.include_router(router_admin.router, prefix="/api/v1")
 app.include_router(router_class_storage.router, prefix="/api/v1")
 app.include_router(router_department_storage.router, prefix="/api/v1")  # NEW
 app.include_router(router_signing.router, prefix="/api/v1")  # NEW
+app.include_router(router_curriculum.router, prefix="/api/v1")
 
 
 @app.get("/health")

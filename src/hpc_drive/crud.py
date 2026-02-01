@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import List, Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, or_
@@ -8,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from . import models, schemas
+from .config import settings
 from .models import ItemType, OwnerType, Permission, ShareLevel, UserRole
 
 
@@ -489,22 +491,6 @@ def admin_delete_item_permanently(db: Session, item_id: uuid.UUID):
     return {"detail": "Item deleted permanently"}
 
 
-def _delete_file_from_storage(storage_path: str | None):
-    if not storage_path:
-        return
-
-    try:
-        full_file_path = models.settings.UPLOADS_DIR / storage_path
-        if full_file_path.is_file():
-            full_file_path.unlink()
-            try:
-                full_file_path.parent.rmdir()
-            except OSError:
-                pass
-    except Exception as e:
-        print(f"Error deleting file {storage_path} from disk: {e}")
-
-
 def get_trashed_item_for_owner(
     db: Session, item_id: uuid.UUID, owner_id: int
 ) -> models.DriveItem:
@@ -629,3 +615,34 @@ def admin_get_items_for_user(
         .order_by(models.DriveItem.item_type, models.DriveItem.name)
         .all()
     )
+
+
+def get_items_in_folder_admin_view(
+    db: Session, parent_id: uuid.UUID
+) -> List[models.DriveItem]:
+    """Lấy tất cả file trong folder mà không check ai là người tạo"""
+    return (
+        db.query(models.DriveItem)
+        .options(joinedload(models.DriveItem.file_metadata))
+        .filter(
+            models.DriveItem.parent_id == parent_id,
+            models.DriveItem.is_trashed == False,
+        )
+        .all()
+    )
+
+
+def _delete_file_from_storage(storage_path: str | None):
+    if not storage_path:
+        return
+
+    try:
+        full_file_path = settings.UPLOADS_DIR / storage_path
+        if full_file_path.is_file():
+            full_file_path.unlink()
+            try:
+                full_file_path.parent.rmdir()
+            except OSError:
+                pass
+    except Exception as e:
+        print(f"Error deleting file {storage_path} from disk: {e}")
