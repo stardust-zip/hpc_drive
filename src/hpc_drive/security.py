@@ -54,6 +54,14 @@ def get_current_user_data_from_auth(
             # Token is invalid or expired
             raise credentials_exception
 
+        elif response.status_code == 404:
+            # User not found in auth service database - treat as invalid credentials
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
         else:
             # Auth service might be down or returned another error
             raise HTTPException(

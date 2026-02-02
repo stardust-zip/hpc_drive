@@ -110,12 +110,10 @@ def upload_curriculum_material(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_session),
 ):
-    # 1. Check quyền
-    if (
-        str(current_user.role) != "TEACHER" and str(current_user.role) != "ADMIN"
-    ):  # Role trong model là TEACHER/ADMIN/STUDENT
+    # 1. Check quyền (so sánh với enum value, không phải string)
+    if current_user.role not in (models.UserRole.TEACHER, models.UserRole.ADMIN):
         raise HTTPException(
-            status_code=403, detail="Chỉ giáo viên được quyền upload giáo trình."
+            status_code=403, detail="Chỉ giảng viên được quyền upload tài liệu."
         )
 
     # 2. Đảm bảo cấu trúc folder
@@ -193,3 +191,85 @@ def delete_material(
 
     crud.trash_item(db, item_id, current_user.user_id)
     return None
+
+
+@router.get("/{item_id}/download")
+async def download_curriculum_material(
+    item_id: uuid.UUID,
+    authorization: str = Header(None),
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_session),
+):
+    """
+    Download a curriculum file. 
+    - Teachers/Admins can download any curriculum file
+    - Students can download if enrolled in the subject
+    """
+    from fastapi.responses import FileResponse
+    
+    # Get the item without ownership check (curriculum files are shared)
+    item = db.query(models.DriveItem).filter(
+        models.DriveItem.item_id == item_id,
+        models.DriveItem.is_trashed == False
+    ).first()
+    
+    if not item:
+        raise HTTPException(status_code=404, detail="File không tồn tại.")
+    
+    if item.item_type != models.ItemType.FILE:
+        raise HTTPException(status_code=400, detail="Chỉ có thể tải file.")
+    
+    # Check if this is a curriculum file (parent folder structure: Curriculum/{subject_code})
+    parent_folder = db.query(models.DriveItem).filter(
+        models.DriveItem.item_id == item.parent_id
+    ).first()
+    
+    if not parent_folder:
+        raise HTTPException(status_code=404, detail="Không tìm thấy thư mục.")
+    
+    # Get the Curriculum root folder
+    curriculum_root = db.query(models.DriveItem).filter(
+        models.DriveItem.item_id == parent_folder.parent_id
+    ).first()
+    
+    # Verify this is under Curriculum folder
+    if not curriculum_root or curriculum_root.name != ROOT_CURRICULUM_NAME:
+        raise HTTPException(status_code=403, detail="Không có quyền tải file này.")
+    
+    subject_code = parent_folder.name
+    
+    # For students, check enrollment
+    role = str(current_user.role)
+    if role == "STUDENT":
+        token = (
+            authorization.split(" ")[1]
+            if authorization and " " in authorization
+            else authorization
+        )
+        
+        is_enrolled = await check_student_enrollment_from_remote(
+            current_user.user_id, subject_code, token
+        )
+        
+        if not is_enrolled:
+            raise HTTPException(status_code=403, detail="Bạn chưa đăng ký môn học này.")
+    
+    # Get file metadata
+    file_meta = db.query(models.FileMetadata).filter(
+        models.FileMetadata.item_id == item_id
+    ).first()
+    
+    if not file_meta or not file_meta.storage_path:
+        raise HTTPException(status_code=404, detail="Không tìm thấy file.")
+    
+    # Construct full path
+    full_path = settings.UPLOADS_DIR / file_meta.storage_path
+    
+    if not full_path.is_file():
+        raise HTTPException(status_code=404, detail="File không tồn tại trên server.")
+    
+    return FileResponse(
+        path=str(full_path),
+        filename=item.name,
+        media_type=file_meta.mime_type or "application/octet-stream",
+    )
