@@ -8,8 +8,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libmariadb-dev-compat \
-    libssl-dev \
-    && rm -rf /var/lib/apt/lists/*
+    libssl-dev \ && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 
@@ -37,4 +36,4 @@ ENV UPLOADS_DIR=/app/src/hpc_drive/uploads
 ENV DATABASE_URL="sqlite:////app/data/drive.db"
 ENV AUTH_SERVICE_ME_URL="http://auth_service:8082/api/v1/me"
 
-CMD ["uvicorn", "--app-dir", "src", "hpc_drive.main:app", "--host", "0.0.0.0", "--port", "7777"]
+CMD ["uvicorn", "--app-dir", "src", "hpc_drive.main:app", "--host", "0.0.0.0", "--port", "7777" ""]

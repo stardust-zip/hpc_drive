@@ -13,7 +13,7 @@ from ...config import settings
 # Updated imports
 from ...database import get_session
 from ...models import User
-from ...security import get_current_user, get_current_user_data_from_auth
+from ...security import get_current_user, get_current_user_data_from_token
 
 router = APIRouter(prefix="/drive", tags=["Drive"])
 
@@ -21,7 +21,7 @@ router = APIRouter(prefix="/drive", tags=["Drive"])
 @router.get("/me", response_model=schemas.UserDataFromAuth)
 def get_user_me(
     current_user_data: schemas.UserDataFromAuth = Depends(
-        get_current_user_data_from_auth
+        get_current_user_data_from_token
     ),
 ):
     """

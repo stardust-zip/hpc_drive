@@ -1,19 +1,23 @@
 import uuid
-from enum import Enum
 from datetime import datetime
+from enum import Enum
 
 from sqlalchemy import (
-    Integer,
-    String,
+    CHAR,
+    UUID,
+    BigInteger,
+    Boolean,
     DateTime,
     ForeignKey,
-    Enum as SAEnum,
-    Boolean,
-    BigInteger,
+    Integer,
+    String,
+    TypeDecorator,
     UniqueConstraint,
-    UUID,
 )
-from sqlalchemy.orm import relationship, Mapped, mapped_column, DeclarativeBase
+from sqlalchemy import (
+    Enum as SAEnum,
+)
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 
@@ -22,6 +26,32 @@ class Base(DeclarativeBase):
     """Base class for all SQLAlchemy models."""
 
     pass
+
+
+class GUID(TypeDecorator):
+    """Platform-independent GUID type.
+    Stores as CHAR(36) in MySQL, but behaves as uuid.UUID in Python.
+    """
+
+    impl = CHAR
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        return dialect.type_descriptor(CHAR(36))
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return value
+        if isinstance(value, uuid.UUID):
+            return str(value)
+        return str(uuid.UUID(value))
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return value
+        if not isinstance(value, uuid.UUID):
+            return uuid.UUID(value)
+        return value
 
 
 # --- Python Enums (Unchanged, as they are classes) ---
@@ -59,6 +89,7 @@ class DocumentType(str, Enum):
 
 class RepositoryType(str, Enum):
     """Type of repository where the item is stored."""
+
     PERSONAL = "PERSONAL"
     CLASS = "CLASS"
     DEPARTMENT = "DEPARTMENT"
@@ -66,6 +97,7 @@ class RepositoryType(str, Enum):
 
 class OwnerType(str, Enum):
     """Type of owner for quick permission checks."""
+
     STUDENT = "STUDENT"
     LECTURER = "LECTURER"
     ADMIN = "ADMIN"
@@ -73,6 +105,7 @@ class OwnerType(str, Enum):
 
 class ProcessStatus(str, Enum):
     """Processing status for malware scanning workflow."""
+
     PENDING_UPLOAD = "PENDING_UPLOAD"
     SCANNING = "SCANNING"
     READY = "READY"
@@ -82,6 +115,7 @@ class ProcessStatus(str, Enum):
 
 class SigningStatus(str, Enum):
     """Status of signing request workflow."""
+
     DRAFT = "DRAFT"
     PENDING = "PENDING"
     APPROVED = "APPROVED"
@@ -123,7 +157,7 @@ class DriveItem(Base):
     __tablename__: str = "drive_items"
 
     item_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        GUID(), primary_key=True, default=uuid.uuid4
     )
     name: Mapped[str] = mapped_column(String(255))
     item_type: Mapped[ItemType] = mapped_column(SAEnum(ItemType))
@@ -136,21 +170,21 @@ class DriveItem(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, onupdate=func.now())
 
     # ===== NEW FIELDS FOR PHASE 1 =====
-    
+
     # Repository type and context
     repository_type: Mapped[RepositoryType] = mapped_column(
         SAEnum(RepositoryType), default=RepositoryType.PERSONAL
     )
     repository_context_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    
+
     # Owner type for quick permission checks
     owner_type: Mapped[OwnerType] = mapped_column(SAEnum(OwnerType))
-    
+
     # Process status for malware scanning
     process_status: Mapped[ProcessStatus] = mapped_column(
         SAEnum(ProcessStatus), default=ProcessStatus.PENDING_UPLOAD
     )
-    
+
     # System-generated folder management
     is_system_generated: Mapped[bool] = mapped_column(Boolean, default=False)
     is_locked: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -198,7 +232,7 @@ class FileMetadata(Base):
 
     mime_type: Mapped[str] = mapped_column(String(255))
     size: Mapped[int] = mapped_column(BigInteger)
-    storage_path: Mapped[str] = mapped_column(String(1024), unique=True)
+    storage_path: Mapped[str] = mapped_column(String(700), unique=True)
     document_type: Mapped[DocumentType | None] = mapped_column(SAEnum(DocumentType))
     version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
@@ -217,7 +251,7 @@ class SharePermission(Base):
     __tablename__: str = "share_permissions"
 
     share_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        GUID(), primary_key=True, default=uuid.uuid4
     )
     permission_level: Mapped[ShareLevel] = mapped_column(SAEnum(ShareLevel))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
@@ -250,20 +284,20 @@ class SigningRequest(Base):
     __tablename__: str = "signing_requests"
 
     request_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        GUID(), primary_key=True, default=uuid.uuid4
     )
-    
+
     # Current status of the signing request
     current_status: Mapped[SigningStatus] = mapped_column(
         SAEnum(SigningStatus), default=SigningStatus.DRAFT
     )
-    
+
     # Admin comment when approving/rejecting
-    admin_comment: Mapped[str | None] = mapped_column(String(1000), nullable=True)
-    
+    admin_comment: Mapped[str | None] = mapped_column(String(700), nullable=True)
+
     # Path to signed file after approval
-    signed_file_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
-    
+    signed_file_path: Mapped[str | None] = mapped_column(String(700), nullable=True)
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, onupdate=func.now())
