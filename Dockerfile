@@ -8,7 +8,8 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libmariadb-dev-compat \
-    libssl-dev \ && rm -rf /var/lib/apt/lists/*
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 
