@@ -1,6 +1,9 @@
+import sys
+
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .config import settings
@@ -78,9 +81,9 @@ def get_current_user(
     user_data: UserDataFromAuth = Depends(get_current_user_data_from_token),
 ) -> User:
     """
-    Syncs the user from the reconstructed schema to the local database.
+    Syncs the user from the reconstructed schema to the local database,
+    with built-in protection against Next.js concurrent request race conditions.
     """
-    # Now we safely read from the Pydantic object again!
     user_id = user_data.id
     username = user_data.account.username
     email = user_data.email
@@ -98,6 +101,21 @@ def get_current_user(
             role=new_role,
         )
         session.add(user)
+        try:
+            session.commit()
+            session.refresh(user)
+        except IntegrityError:
+            # RACE CONDITION FIX: Next.js fired two requests at the exact same time.
+            # Another thread already created the user a millisecond ago!
+            session.rollback()
+            user = session.get(User, user_id)
+        except Exception as e:
+            session.rollback()
+            print(f"FATAL DB ERROR (Create): {e}", file=sys.stderr)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to sync user profile to local DB",
+            )
     else:
         update_made = False
         if user.username != username:
@@ -112,17 +130,16 @@ def get_current_user(
 
         if update_made:
             session.add(user)
-
-    try:
-        if session.new or session.dirty:
-            session.commit()
-            session.refresh(user)
-    except Exception as e:
-        session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to sync user profile to local DB",
-        )
+            try:
+                session.commit()
+                session.refresh(user)
+            except Exception as e:
+                session.rollback()
+                print(f"FATAL DB ERROR (Update): {e}", file=sys.stderr)
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to sync user profile to local DB",
+                )
 
     return user
 
