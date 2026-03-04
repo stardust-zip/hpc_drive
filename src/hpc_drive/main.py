@@ -34,6 +34,8 @@ origins = [
     "http://103.126.161.228",
     "http://hethongdientu.khoacongnghethongtinhpc.io.vn",
     "https://hethongdientu.khoacongnghethongtinhpc.io.vn",
+    "http://hethongdientu.khoacongnghethongtinhpc.io.vn:3001",
+    "https://hethongdientu.khoacongnghethongtinhpc.io.vn:3001",
 ]
 
 
