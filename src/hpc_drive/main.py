@@ -32,6 +32,8 @@ origins = [
     "http://localhost:3001",
     "http://103.126.161.228:3001",
     "http://103.126.161.228",
+    "http://hethongdientu.khoacongnghethongtinhpc.io.vn",
+    "https://hethongdientu.khoacongnghethongtinhpc.io.vn",
 ]
 
 
@@ -44,7 +46,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    alow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],  # Allow all methods (GET, POST, etc.)
     allow_headers=["*"],  # Allow all headers (Authorization, Content-Type, etc.)
