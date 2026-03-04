@@ -5,7 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE 1
 
 WORKDIR /app
 
-UN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libmariadb-dev-compat \
     libssl-dev \
