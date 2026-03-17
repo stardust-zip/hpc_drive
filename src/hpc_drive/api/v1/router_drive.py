@@ -118,21 +118,24 @@ def download_item(
         user_id=current_user.user_id,
     )
 
-    # db_item is a DriveItem object, NOT a dict. Use dot notation.
-    if db_item.item_type != "FILE":
+    # Fix: db_item is actually a dictionary because crud.get_drive_item serializes it
+    if db_item.get("item_type") != "FILE":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only files can be downloaded",
         )
 
-    if not db_item.file_metadata or not db_item.file_metadata.storage_path:
+    file_metadata = db_item.get("file_metadata") or {}
+    storage_path = file_metadata.get("storage_path")
+
+    if not storage_path:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="File not found",
         )
 
     # Construct the absolute path from the base uploads dir and the relative path
-    full_file_path = settings.UPLOADS_DIR / db_item.file_metadata.storage_path
+    full_file_path = settings.UPLOADS_DIR / storage_path
 
     if not full_file_path.is_file():
         raise HTTPException(
@@ -142,7 +145,7 @@ def download_item(
 
     from urllib.parse import quote
 
-    encoded_filename = quote(db_item.name or "downloaded_file")
+    encoded_filename = quote(db_item.get("name") or "downloaded_file")
     headers = {
         "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}",
         "Access-Control-Expose-Headers": "Content-Disposition",
@@ -150,7 +153,7 @@ def download_item(
 
     return FileResponse(
         path=str(full_file_path),
-        media_type=db_item.file_metadata.mime_type or "application/octet-stream",
+        media_type=file_metadata.get("mime_type") or "application/octet-stream",
         headers=headers,
     )
 
