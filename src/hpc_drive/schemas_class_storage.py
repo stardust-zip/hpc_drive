@@ -22,6 +22,12 @@ class ClassFolderGenerateRequest(BaseModel):
     semester_id: Optional[int] = Field(None, description="Specific semester to generate folders for (optional)")
     
 
+class ClassFolderCreateRequest(BaseModel):
+    """Request to create a custom folder in class storage."""
+    name: str = Field(..., description="Folder name")
+    parent_id: Optional[str] = Field(None, description="Parent folder ID")
+
+
 class ClassStorageUploadRequest(BaseModel):
     """Metadata for uploading file to class storage."""
     
@@ -60,9 +66,11 @@ class ClassItemResponse(BaseModel):
     item_type: str  # FILE or FOLDER
     is_system_generated: bool
     is_locked: bool
+    folder_type: Optional[str] = None  # SUBMISSION, CLASS_INFO, NORMAL
     process_status: str
     created_at: datetime
     updated_at: Optional[datetime]
+    parent_id: Optional[uuid.UUID] = None
     
     # File metadata (if type = FILE)
     file_size: Optional[int] = None
@@ -81,3 +89,4 @@ class ClassListResponse(BaseModel):
     class_code: str
     role: str  # LECTURER or STUDENT
     has_upload_permission: bool
+    has_storage: bool = False  # True if folder structure has been generated

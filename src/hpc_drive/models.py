@@ -108,6 +108,7 @@ class ProcessStatus(str, Enum):
 
     PENDING_UPLOAD = "PENDING_UPLOAD"
     SCANNING = "SCANNING"
+    SCAN_PENDING = "SCAN_PENDING"
     READY = "READY"
     INFECTED = "INFECTED"
     ERROR = "ERROR"
@@ -120,6 +121,15 @@ class SigningStatus(str, Enum):
     PENDING = "PENDING"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
+
+
+class FolderType(str, Enum):
+    """Type of folder for special permission handling."""
+    NORMAL = "NORMAL"
+    SUBMISSION = "SUBMISSION"
+    CLASS_INFO = "CLASS_INFO"
+    # Future expansion: EXAM_BANK = "EXAM_BANK" (lecturer-only access)
+
 
 
 # --- Models (CONVERTED TO SNAKE_CASE) ---
@@ -141,11 +151,25 @@ class User(Base):
     role: Mapped[UserRole] = mapped_column(SAEnum(UserRole))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
+    # Storage Quota Management
+    # Default 10GB = 10 * 1024 * 1024 * 1024 bytes
+    storage_quota: Mapped[int] = mapped_column(BigInteger, default=10737418240)
+    # Total bytes used by non-trashed files
+    used_storage: Mapped[int] = mapped_column(BigInteger, default=0)
+    # Max size for a single file upload, default 2GB = 2 * 1024 * 1024 * 1024
+    max_file_size: Mapped[int] = mapped_column(BigInteger, default=2147483648)
+
+    # ===== NEW FIELDS FOR PHASE 1 =====
+    custom_storage_quota_gb: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_unlimited_storage: Mapped[bool] = mapped_column(Boolean, default=False)
+
     # Relations
     owned_items: Mapped[list["DriveItem"]] = relationship(back_populates="owner")
     shared_with_me: Mapped[list["SharePermission"]] = relationship(
         back_populates="shared_with_user"
     )
+    starred_items: Mapped[list["StarredItem"]] = relationship(back_populates="user")
+    notifications: Mapped[list["Notification"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class DriveItem(Base):
@@ -178,8 +202,10 @@ class DriveItem(Base):
     repository_context_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Owner type for quick permission checks
-    owner_type: Mapped[OwnerType] = mapped_column(SAEnum(OwnerType))
-
+    owner_type: Mapped[OwnerType] = mapped_column(
+        SAEnum(OwnerType), default=OwnerType.STUDENT, server_default="STUDENT"
+    )
+    
     # Process status for malware scanning
     process_status: Mapped[ProcessStatus] = mapped_column(
         SAEnum(ProcessStatus), default=ProcessStatus.PENDING_UPLOAD
@@ -188,6 +214,11 @@ class DriveItem(Base):
     # System-generated folder management
     is_system_generated: Mapped[bool] = mapped_column(Boolean, default=False)
     is_locked: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    # Folder type for special permission handling (SUBMISSION, CLASS_INFO, etc.)
+    folder_type: Mapped[FolderType | None] = mapped_column(
+        SAEnum(FolderType), nullable=True, default=None
+    )
 
     # Foreign Keys
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
@@ -209,6 +240,9 @@ class DriveItem(Base):
         back_populates="drive_item", cascade="all, delete-orphan"
     )
     share_permissions: Mapped[list["SharePermission"]] = relationship(
+        back_populates="item", cascade="all, delete-orphan"
+    )
+    starred_by: Mapped[list["StarredItem"]] = relationship(
         back_populates="item", cascade="all, delete-orphan"
     )
 
@@ -318,3 +352,58 @@ class SigningRequest(Base):
     drive_item: Mapped["DriveItem"] = relationship()
     requester: Mapped["User"] = relationship(foreign_keys=[requester_id])
     approver: Mapped["User | None"] = relationship(foreign_keys=[approver_id])
+
+
+class SystemSetting(Base):
+    """
+    Global system settings as key-value pairs.
+    All attributes are snake_case.
+    """
+    __tablename__: str = "system_settings"
+
+    key: Mapped[str] = mapped_column(String(255), primary_key=True)
+    value: Mapped[str] = mapped_column(String(1024))
+    description: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class StarredItem(Base):
+    """
+    Junction table for user-specific starring of items.
+    """
+
+    __tablename__: str = "starred_items"
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.user_id", ondelete="CASCADE"), primary_key=True
+    )
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("drive_items.item_id", ondelete="CASCADE"), primary_key=True
+    )
+
+    # Relations (Optional but helpful)
+    user: Mapped["User"] = relationship(back_populates="starred_items")
+    item: Mapped["DriveItem"] = relationship(back_populates="starred_by")
+
+
+class Notification(Base):
+    """
+    Stores system and admin notifications for users.
+    """
+    __tablename__: str = "notifications"
+
+    notification_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
+    
+    # Type of notification (e.g., 'QUOTA_CHANGE', 'FILE_DELETED', 'SYSTEM_UPDATE')
+    type: Mapped[str] = mapped_column(String(50))
+    message: Mapped[str] = mapped_column(String(1000))
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    # Relations
+    user: Mapped["User"] = relationship(back_populates="notifications")

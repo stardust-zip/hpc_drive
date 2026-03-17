@@ -9,11 +9,14 @@ from .api.v1 import (
     router_curriculum,
     router_department_storage,
     router_drive,
+    router_notifications, # Added router_notifications
     router_signing,
+    router_submissions,
 )
 
 # Import from our new database file
 from .database import create_db_and_tables
+from .config import settings
 
 
 @asynccontextmanager
@@ -50,7 +53,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],  # Allow all methods (GET, POST, etc.)
+    allow_methods=["*"],  # Allow all methods (GET, POST, PUT, DELETE, OPTIONS, etc.)
     allow_headers=["*"],  # Allow all headers (Authorization, Content-Type, etc.)
 )
 
@@ -58,10 +61,12 @@ app.add_middleware(
 # Include the routers
 app.include_router(router_drive.router, prefix="/api/v1")
 app.include_router(router_admin.router, prefix="/api/v1")
+app.include_router(router_notifications.router, prefix="/api/v1")
 app.include_router(router_class_storage.router, prefix="/api/v1")
-app.include_router(router_department_storage.router, prefix="/api/v1")  # NEW
-app.include_router(router_signing.router, prefix="/api/v1")  # NEW
+app.include_router(router_department_storage.router, prefix="/api/v1")
+app.include_router(router_signing.router, prefix="/api/v1")
 app.include_router(router_curriculum.router, prefix="/api/v1")
+app.include_router(router_submissions.router, prefix="/api/v1")  # Student submissions
 
 
 @app.get("/health")

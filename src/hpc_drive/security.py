@@ -8,10 +8,9 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import get_session
-from .models import User, UserRole
-
-# ---> IMPORT THE SCHEMAS
-from .schemas import AuthAccount, UserDataFromAuth
+from .models import User, UserRole  # Our local SQLModel User
+from .schemas import AuthMeResponse, UserDataFromAuth  # The new schemas
+from . import crud
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -94,11 +93,21 @@ def get_current_user(
     user = session.get(User, user_id)
 
     if user is None:
+        # User does not exist locally, create them
+        print(f"User not found locally (ID: {user_data.id}). Syncing new user...")
+
+        # ***** CORRECTED TO SNAKE_CASE *****
+        # Get default quota from system settings
+        sys_settings = crud.get_system_settings(session)
+        default_quota_bytes = sys_settings.default_quota_gb * (1024**3)
+
         user = User(
             user_id=user_id,
             username=username,
             email=email,
             role=new_role,
+            storage_quota=default_quota_bytes,
+            max_file_size=sys_settings.max_upload_size_mb * (1024**2)
         )
         session.add(user)
         try:
@@ -127,19 +136,48 @@ def get_current_user(
         if user.role != new_role:
             user.role = new_role
             update_made = True
+            
+        # Ensure storage fields are initialized (for existing users after migration)
+        if user.storage_quota is None or user.storage_quota == 10737418240:
+            # Only update if it's None or the old hardcoded default, 
+            # and the user doesn't have a custom quota
+            if user.custom_storage_quota_gb is None:
+                sys_settings = crud.get_system_settings(session)
+                user.storage_quota = sys_settings.default_quota_gb * (1024**3)
+                update_made = True
+                
+        if user.used_storage is None:
+            user.used_storage = 0
+            update_made = True
+            
+        if user.max_file_size is None or user.max_file_size == 2147483648:
+            if user.role != UserRole.ADMIN: # Admins usually have higher limits or handled elsewhere
+                 sys_settings = crud.get_system_settings(session)
+                 user.max_file_size = sys_settings.max_upload_size_mb * (1024**2)
+                 update_made = True
 
         if update_made:
             session.add(user)
-            try:
-                session.commit()
-                session.refresh(user)
-            except Exception as e:
-                session.rollback()
-                print(f"FATAL DB ERROR (Update): {e}", file=sys.stderr)
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Failed to sync user profile to local DB",
-                )
+
+    try:
+        session.commit()
+        session.refresh(user)
+    except Exception as e:
+        session.rollback()
+        import sqlite3
+        from sqlalchemy.exc import IntegrityError
+        # Handle parallel requests race condition (another request inserted the user)
+        if isinstance(e, IntegrityError) or "UNIQUE constraint failed" in str(e):
+            print(f"Parallel insert detected for user {user_data.id}, falling back to fetch.")
+            user = session.get(User, user_data.id)
+            if user:
+                return user
+                
+        print(f"Error committing user sync: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to sync user profile to local DB",
+        )
 
     return user
 

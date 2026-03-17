@@ -3,7 +3,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
-from .models import ItemType, Permission, ShareLevel, UserRole
+from .models import ItemType, Permission, RepositoryType, ShareLevel, UserRole
 
 
 class AuthAccount(BaseModel):
@@ -94,10 +94,17 @@ class DriveItemResponse(DriveItemBase):
     created_at: datetime
     updated_at: datetime | None = None
     is_trashed: bool
+    is_starred: bool = False
     permission: Permission
 
     # Nested metadata, will be None if it's a folder
     file_metadata: FileMetadataResponse | None = None
+    shared_permission: ShareLevel | None = None  # The permission level for the current user (if shared)
+    is_shared: bool = False
+    owner_username: str | None = None  # Owner's username for shared items
+    repository_type: RepositoryType | None = None  # Where the item is stored (PERSONAL/CLASS/DEPARTMENT)
+    repository_context_id: int | None = None  # ID of the class or department (if applicable)
+    size: int | None = None  # Total size (recursive for folders)
 
 
 class ShareCreate(BaseModel):
@@ -105,7 +112,7 @@ class ShareCreate(BaseModel):
 
     # We'll share by username, as it's unique and in our User model
     username: str
-    # We don't need 'level' since we default to VIEWER
+    permission_level: ShareLevel = ShareLevel.VIEWER
 
 
 class UserSimpleResponse(BaseModel):
@@ -134,6 +141,17 @@ class DriveItemListResponse(BaseModel):
     items: list[DriveItemResponse]
 
 
+class PaginatedDriveItemListResponse(BaseModel):
+    """Schema for returning a paginated list of items for admin"""
+
+    items: list[DriveItemResponse]
+    total: int
+    skip: int
+    limit: int
+    file_count: int | None = 0
+    folder_count: int | None = 0
+    total_size: int | None = 0
+
 class DriveItemUpdate(BaseModel):
     """
     Schema for updating an item.
@@ -153,6 +171,9 @@ class DriveItemSearchQuery(BaseModel):
     name: str | None = None  # Search for a name containing this string
     item_type: ItemType | None = None  # Filter by FILE or FOLDER
     mime_type: str | None = None  # Filter by a specific MIME type
+    start_date: str | None = None  # ISO format date string (YYYY-MM-DD)
+    end_date: str | None = None  # ISO format date string (YYYY-MM-DD)
+    is_starred: bool | None = None # Filter by starred status
 
 
 class UserResponse(BaseModel):
@@ -164,4 +185,50 @@ class UserResponse(BaseModel):
     username: str
     email: str
     role: UserRole
+    created_at: datetime
+    storage_quota: int
+    used_storage: int
+    max_file_size: int
+    custom_storage_quota_gb: int | None = None
+    is_unlimited_storage: bool = False
+
+
+class UserQuotaUpdate(BaseModel):
+    """Schema for admin to update user storage limits"""
+
+    storage_quota: int | None = None
+    max_file_size: int | None = None
+    custom_storage_quota_gb: int | None = None
+    is_unlimited_storage: bool | None = None
+
+
+class SystemSettingsUpdate(BaseModel):
+    """Schema for system settings update"""
+
+    max_upload_size_mb: int | None = None
+    blocked_extensions: str | None = None
+    default_quota_gb: int | None = None
+    quarantine_enabled: bool | None = None
+
+
+class StorageUsageResponse(BaseModel):
+    """Schema for current user to see their usage"""
+
+    used_storage: int
+    storage_quota: int
+    max_file_size: int
+    images_storage: int = 0
+    documents_storage: int = 0
+    videos_storage: int = 0
+    others_storage: int = 0
+
+
+class NotificationResponse(BaseModel):
+    """Schema for returning a notification to the user"""
+    model_config = ConfigDict(from_attributes=True)
+
+    notification_id: uuid.UUID
+    type: str
+    message: str
+    is_read: bool
     created_at: datetime
