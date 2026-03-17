@@ -125,11 +125,11 @@ class SigningStatus(str, Enum):
 
 class FolderType(str, Enum):
     """Type of folder for special permission handling."""
+
     NORMAL = "NORMAL"
     SUBMISSION = "SUBMISSION"
     CLASS_INFO = "CLASS_INFO"
     # Future expansion: EXAM_BANK = "EXAM_BANK" (lecturer-only access)
-
 
 
 # --- Models (CONVERTED TO SNAKE_CASE) ---
@@ -169,7 +169,9 @@ class User(Base):
         back_populates="shared_with_user"
     )
     starred_items: Mapped[list["StarredItem"]] = relationship(back_populates="user")
-    notifications: Mapped[list["Notification"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    notifications: Mapped[list["Notification"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class DriveItem(Base):
@@ -205,7 +207,7 @@ class DriveItem(Base):
     owner_type: Mapped[OwnerType] = mapped_column(
         SAEnum(OwnerType), default=OwnerType.STUDENT, server_default="STUDENT"
     )
-    
+
     # Process status for malware scanning
     process_status: Mapped[ProcessStatus] = mapped_column(
         SAEnum(ProcessStatus), default=ProcessStatus.PENDING_UPLOAD
@@ -214,7 +216,7 @@ class DriveItem(Base):
     # System-generated folder management
     is_system_generated: Mapped[bool] = mapped_column(Boolean, default=False)
     is_locked: Mapped[bool] = mapped_column(Boolean, default=False)
-    
+
     # Folder type for special permission handling (SUBMISSION, CLASS_INFO, etc.)
     folder_type: Mapped[FolderType | None] = mapped_column(
         SAEnum(FolderType), nullable=True, default=None
@@ -359,6 +361,7 @@ class SystemSetting(Base):
     Global system settings as key-value pairs.
     All attributes are snake_case.
     """
+
     __tablename__: str = "system_settings"
 
     key: Mapped[str] = mapped_column(String(255), primary_key=True)
@@ -392,13 +395,16 @@ class Notification(Base):
     """
     Stores system and admin notifications for users.
     """
+
     __tablename__: str = "notifications"
 
     notification_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        GUID(), primary_key=True, default=uuid.uuid4
     )
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
-    
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.user_id", ondelete="CASCADE"), index=True
+    )
+
     # Type of notification (e.g., 'QUOTA_CHANGE', 'FILE_DELETED', 'SYSTEM_UPDATE')
     type: Mapped[str] = mapped_column(String(50))
     message: Mapped[str] = mapped_column(String(1000))
