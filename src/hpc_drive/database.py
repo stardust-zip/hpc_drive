@@ -2,7 +2,7 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from .config import settings
-from .models import Base  # Import Base from our snake_case models
+from .models import Base 
 
 # We need connect_args for SQLite
 connect_args = {}
@@ -13,7 +13,6 @@ engine = create_engine(
     settings.DATABASE_URL, echo=True, connect_args=connect_args
 )
 
-# This is the factory for our sessions
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
@@ -85,8 +84,6 @@ def create_db_and_tables():
     # This will create all tables that inherit from Base (but won't alter existing ones)
     Base.metadata.create_all(bind=engine)
 
-
-# This is our new FastAPI dependency
 def get_session():
     db = SessionLocal()
     try:

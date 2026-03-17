@@ -22,7 +22,7 @@ router = APIRouter(prefix="/drive", tags=["Drive"])
 @router.get("/me", response_model=schemas.UserDataFromAuth)
 def get_user_me(
     current_user_data: schemas.UserDataFromAuth = Depends(
-        get_current_user_data_from_auth
+        get_current_user_data_from_token
     ),
 ):
     """

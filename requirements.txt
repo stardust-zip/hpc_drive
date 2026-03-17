@@ -6,7 +6,7 @@ fastapi
 passlib
 pydantic
 pydantic-settings
-PyJWT
+PyJWT>=2.8.0
 python-dotenv
 httpx  # For System-Management API integration
 python-jose
@@ -15,9 +15,9 @@ requests
 sqlalchemy
 sqlmodel
 uvicorn[standard]
-PyMySQL
+pymysql>=1.1.0
 alembic
-cryptography
+cryptography>=41.0.0
 
 # Development & Testing Dependencies
 black

@@ -30,18 +30,16 @@ async def lifespan(app: FastAPI):
     print("Shutting down...")
 
 
-# CORS Configuration - Parse origins from settings
-raw_origins = settings.CORS_ALLOWED_ORIGINS
-if raw_origins:
-    origins = [o.strip() for o in raw_origins.split(",") if o.strip()]
-else:
-    # Fallback to defaults if not set
-    origins = [
-        "http://localhost:3001",
-        "http://localhost:3000",
-        "http://127.0.0.1:3001",
-        "http://127.0.0.1:3000",
-    ]
+origins = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://103.126.161.228:3001",
+    "http://103.126.161.228",
+    "http://hethongdientu.khoacongnghethongtinhpc.io.vn",
+    "https://hethongdientu.khoacongnghethongtinhpc.io.vn",
+    "http://hethongdientu.khoacongnghethongtinhpc.io.vn:3001",
+    "https://hethongdientu.khoacongnghethongtinhpc.io.vn:3001",
+]
 
 
 app = FastAPI(
